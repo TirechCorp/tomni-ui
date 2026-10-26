@@ -2458,7 +2458,11 @@ impl Tree {
     /// Rola até o widget que uma camada focou ao abrir ou fechar. O loop de frame chama depois
     /// do layout, quando a camada já tem posição.
     pub fn reveal_pending(&mut self) {
-        if let Some(name) = crate::text_editor::take_focus_request() {
+        // Os pedidos globais valem para todas as janelas: esta só pega o que pode atender agora,
+        // e a janela de onde veio o pedido tem a vez (ver `claim_request`).
+        if let Some(name) = crate::text_editor::claim_focus_request(|name| {
+            self.find(name).is_some_and(|id| self.can_focus(id))
+        }) {
             self.pending_focus = Some((name, FOCUS_LATER_TRIES));
         }
         if let Some((name, tries)) = self.pending_focus.take() {
@@ -2471,17 +2475,13 @@ impl Tree {
                 None => {}
             }
         }
-        if let Some(name) = crate::text_editor::take_focus_inside_request() {
+        if let Some(name) = crate::text_editor::claim_focus_inside_request(|name| {
+            self.first_tab_stop_inside(name).is_some()
+        }) {
             self.pending_focus_inside = Some((name, FOCUS_LATER_TRIES));
         }
         if let Some((name, tries)) = self.pending_focus_inside.take() {
-            let first = self.find(&name).and_then(|root| {
-                self.order[self.position[root] + 1..]
-                    .iter()
-                    .copied()
-                    .take_while(|&n| self.is_inside(n, root))
-                    .find(|&n| self.shown(n) && self.can_focus(n) && self.tab_stop(n))
-            });
+            let first = self.first_tab_stop_inside(&name);
             match first {
                 Some(id) => {
                     self.set_focus(Some(id), FocusSource::Keyboard);
@@ -2496,7 +2496,9 @@ impl Tree {
         {
             self.bring_into_view(id);
         }
-        if let Some(name) = crate::text_editor::take_reveal_request() {
+        if let Some(name) = crate::text_editor::claim_reveal_request(|name| {
+            self.find(name).is_some_and(|id| self.shown(id))
+        }) {
             self.pending_bring = Some((name, FOCUS_LATER_TRIES));
         }
         if let Some((name, tries)) = self.pending_bring.take() {
@@ -2506,6 +2508,16 @@ impl Tree {
                 None => {}
             }
         }
+    }
+
+    /// A primeira parada de Tab dentro do widget com o id `name`, que aparece e aceita o foco.
+    fn first_tab_stop_inside(&self, name: &str) -> Option<NodeId> {
+        let root = self.find(name)?;
+        self.order[self.position[root] + 1..]
+            .iter()
+            .copied()
+            .take_while(|&n| self.is_inside(n, root))
+            .find(|&n| self.shown(n) && self.can_focus(n) && self.tab_stop(n))
     }
 
     /// Dono da dica sob `point`: o widget mais de cima, com `.tooltip()`, cuja parte visível

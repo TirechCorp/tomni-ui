@@ -56,6 +56,9 @@ struct Modo {
     exec_imediato: Arc<AtomicBool>,
     /// O servidor só oferece `none` na compressão (o padrão dele oferece também o `zlib`).
     sem_compressao: Arc<AtomicBool>,
+    /// Quantas recusas de autenticação o servidor tolera antes de derrubar a conexão (o
+    /// `MaxAuthTries` do OpenSSH); 0 deixa o padrão do `russh`.
+    max_tentativas: Arc<AtomicUsize>,
 }
 
 impl Modo {
@@ -616,6 +619,7 @@ impl Teste {
             x11_ao_autenticar: Arc::default(),
             exec_imediato: Arc::default(),
             sem_compressao: Arc::default(),
+            max_tentativas: Arc::default(),
         };
         let chave = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
         let servidor = chave.public_key().clone();
@@ -633,6 +637,7 @@ impl Teste {
             while let Ok((stream, _)) = listener.accept() {
                 aceitas.fetch_add(1, Ordering::SeqCst);
                 let sem_compressao = Arc::clone(&modo_servidor.sem_compressao);
+                let max_tentativas = modo_servidor.max_tentativas.load(Ordering::SeqCst);
                 let handler = Servidor {
                     client: publica.clone(),
                     log: Arc::clone(&registro),
@@ -657,8 +662,14 @@ impl Teste {
                             preferred.compression =
                                 std::borrow::Cow::Borrowed(&[russh::compression::NONE]);
                         }
+                        let padrao = server::Config::default().max_auth_attempts;
                         let config = Arc::new(server::Config {
                             preferred,
+                            max_auth_attempts: if max_tentativas == 0 {
+                                padrao
+                            } else {
+                                max_tentativas
+                            },
                             keys: vec![chave],
                             auth_rejection_time: Duration::ZERO,
                             auth_rejection_time_initial: Some(Duration::ZERO),
@@ -1282,6 +1293,105 @@ fn agente_travado_ou_sem_a_chave_nao_autentica() {
         .agent_path(agente.path())
         .connect();
     assert_eq!(ler_ate(&mut ssh, "bem-vinda").1, Status::Open);
+}
+
+/// O agente do Tomni UI com 8 chaves que o servidor não aceita e, por último, a certa.
+#[cfg(unix)]
+fn agente_cheio(teste: &Teste) -> agent::Agent {
+    let agente = agent::Agent::start(Some(teste.pasta.join("cheio.sock"))).unwrap();
+    for n in 0..8 {
+        let outra = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        agente
+            .add(outra, &format!("outra-{n}"), agent::Constraints::default())
+            .expect("guardar");
+    }
+    agente
+        .add(
+            teste.cliente.clone(),
+            "certa",
+            agent::Constraints::default(),
+        )
+        .expect("guardar");
+    agente
+}
+
+#[cfg(unix)]
+#[test]
+fn com_muitas_chaves_no_agente_a_da_conexao_vai_primeiro() {
+    let teste = Teste::novo("agente-cheio");
+    teste.modo.max_tentativas.store(6, Ordering::SeqCst);
+    teste.conhecer_servidor();
+    let agente = agente_cheio(&teste);
+
+    // Sem saber qual é a chave, as 8 erradas esgotam o limite do servidor antes da certa, e a
+    // mensagem diz isso (não que o agente recusou).
+    let mut ssh = teste
+        .builder()
+        .agent_auth()
+        .agent_path(agente.path())
+        .connect();
+    let (_, status) = ler_ate(&mut ssh, "bem-vinda");
+    let Status::Closed(Some(erro)) = status else {
+        panic!("{status:?}");
+    };
+    assert!(erro.contains("MaxAuthTries"), "{erro}");
+    assert!(!erro.contains("agente recusou"), "{erro}");
+
+    // Com a chave ligada à conexão (a do cofre), a cópia dela no agente vai primeiro.
+    let mut ssh = teste
+        .builder()
+        .agent_auth()
+        .agent_path(agente.path())
+        .key(teste.cliente.clone())
+        .connect();
+    let (texto, status) = ler_ate(&mut ssh, "bem-vinda");
+    assert_eq!(status, Status::Open, "{texto}");
+
+    // Pelo arquivo cifrado, sem a senha: a pública vai às claras, e o agente assina.
+    let arquivo = teste.pasta.join("id_cifrada");
+    let cifrada = teste
+        .cliente
+        .encrypt(&mut rand::rng(), "segredo")
+        .unwrap()
+        .to_openssh(LineEnding::LF)
+        .unwrap();
+    std::fs::write(&arquivo, cifrada.as_bytes()).unwrap();
+    let mut ssh = teste
+        .builder()
+        .agent_auth()
+        .agent_path(agente.path())
+        .key_file(&arquivo, None)
+        .connect();
+    let (texto, status) = ler_ate(&mut ssh, "bem-vinda");
+    assert_eq!(status, Status::Open, "{texto}");
+}
+
+#[cfg(unix)]
+#[test]
+fn um_arquivo_de_chave_que_falta_nao_impede_o_agente() {
+    let teste = Teste::novo("arquivo-que-falta");
+    teste.conhecer_servidor();
+    let agente = nosso_agente(&teste, &teste.cliente);
+    // O caminho de outro computador (veio de uma importação) não existe aqui.
+    let mut ssh = teste
+        .builder()
+        .agent_auth()
+        .agent_path(agente.path())
+        .key_file(teste.pasta.join("nao-existe"), None)
+        .connect();
+    let (texto, status) = ler_ate(&mut ssh, "bem-vinda");
+    assert_eq!(status, Status::Open, "{texto}");
+
+    // Sem o agente, o erro é o do arquivo.
+    let mut ssh = teste
+        .builder()
+        .key_file(teste.pasta.join("nao-existe"), None)
+        .connect();
+    let (_, status) = ler_ate(&mut ssh, "bem-vinda");
+    let Status::Closed(Some(erro)) = status else {
+        panic!("{status:?}");
+    };
+    assert!(erro.contains("nao-existe"), "{erro}");
 }
 
 #[cfg(unix)]

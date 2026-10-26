@@ -160,7 +160,7 @@ pub use tab_view::{
 pub use text::{Text, TextRamp, TextVisual};
 pub use text_editor::{
     EditorPoints, EditorText, KeyEvent, Mark, StyleRange, TextEditor, TextEditorController,
-    TextEditorVisual, request_focus, request_focus_inside, start_bring_into_view,
+    TextEditorVisual, request_focus, request_focus_in, request_focus_inside, start_bring_into_view,
 };
 pub use title_bar::{
     CAPTION_BUTTON_WIDTH, CaptionButtonVisual, CaptionGlyph, DRAG_SLOP, PaneLink, RESIZE_BORDER,

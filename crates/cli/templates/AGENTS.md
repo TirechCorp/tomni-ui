@@ -300,6 +300,10 @@ TextEditor::bind(texto)
   `tomni_ui::request_focus`) faz o mesmo para qualquer widget com foco (uma barra de busca que acabou
   de abrir num `Show`): a árvore atende no quadro seguinte e tenta de novo por alguns quadros
   se o widget ainda não existe. Chame de um evento ou de um efeito, não da construção da view.
+  Com várias janelas, a do evento que pediu atende primeiro, mesmo que o id exista também em
+  outra (a mesma tela montada nas duas); se ela não tem o widget, outra janela atende. Um
+  efeito roda no quadro de qualquer janela: dali, diga qual atende primeiro com
+  `request_focus_in(janela, "id")` (a ativa, de `active_window()`).
   `start_bring_into_view("id")` (`tomni_ui::start_bring_into_view`, o `StartBringIntoView` do
   WinUI) só rola os `ScrollViewer` em volta até o widget aparecer inteiro, sem mexer no foco:
   serve para a linha de um `TreeView` escolhida pelo código (`{id da árvore}-{chave}`; escolha
@@ -1523,7 +1527,8 @@ cadeia pode ter vários, cada um com a própria autenticação e a própria conf
 um erro no meio do caminho aparece com o `host:porta` do salto); `.proxy(Proxy::Socks5 { host,
 port, user, password })` ou `Proxy::Http { .. }` (HTTP CONNECT) chega ao primeiro servidor por
 um proxy; `.agent_auth()` tenta as chaves do ssh-agent (o `SSH_AUTH_SOCK`; `.agent_path(caminho)`
-escolhe outro socket); `.agent_forward(true)` deixa o servidor usar o agente local;
+escolhe outro socket), na ordem do OpenSSH: a cópia no agente das chaves de `.key_file`/`.key`
+primeiro, as outras do agente depois delas (o servidor derruba quem erra mais que o `MaxAuthTries`); `.agent_forward(true)` deixa o servidor usar o agente local;
 `.keepalive(Duration::from_secs(30))` (30 s por padrão) derruba a conexão que parou de
 responder; `.term("xterm-256color")` muda o tipo do terminal;
 `.before_connect(|aviso| { aviso("Subindo a rede…"); Ok(()) })` roda na thread da conexão antes

@@ -64,9 +64,12 @@ const END_REASON_WAIT: Duration = Duration::from_millis(200);
 /// passa, como o `StrictHostKeyChecking` do OpenSSH. Para perguntar à pessoa, o app usa o
 /// `check_host_key` e grava a resposta com [`HostKey::remember`].
 ///
-/// A autenticação tenta o agente de chaves ([`SshBuilder::agent_auth`]), as chaves
-/// ([`SshBuilder::key_file`]) e depois a senha. A senha não é pedida no terminal: o app pede
-/// antes, num `PasswordBox`.
+/// A autenticação tenta as chaves, na ordem do OpenSSH: primeiro a cópia no agente
+/// ([`SshBuilder::agent_auth`]) das chaves da conexão ([`SshBuilder::key_file`] e
+/// [`SshBuilder::key`]), depois as próprias chaves, as outras do agente e por fim a senha. Assim a
+/// chave certa chega antes do limite de tentativas do servidor (o `MaxAuthTries`), mesmo com
+/// muitas chaves no agente. A senha não é pedida no terminal: o app pede antes, num
+/// `PasswordBox`.
 ///
 /// Uma sessão encerrada reabre pelo [`Session::restart`](crate::Session::restart), e o
 /// Alt+Shift+D de um [`TerminalPanes`](crate::TerminalPanes) abre uma conexão nova com a mesma
@@ -455,8 +458,9 @@ impl SshBuilder {
     }
 
     /// Autentica com as chaves do agente (o `ssh-agent`, ou o Pageant e o agente do OpenSSH no
-    /// Windows), antes das chaves de arquivo e da senha. Um agente que não existe não é erro:
-    /// a autenticação segue para o resto.
+    /// Windows). A cópia no agente das chaves da conexão vai primeiro; as outras, depois das
+    /// chaves da conexão e antes da senha. Um agente que não existe não é erro: a autenticação
+    /// segue para o resto.
     pub fn agent_auth(mut self) -> Self {
         self.agent_auth = true;
         self
@@ -1363,32 +1367,49 @@ async fn open(
     Ok(handle)
 }
 
-/// Tenta o agente, as chaves, depois a senha (ou o método `none`, sem nenhuma das duas).
+/// Tenta as chaves e depois a senha (ou o método `none`, sem nenhuma das duas), na ordem do
+/// OpenSSH: primeiro a cópia no agente das chaves da conexão ([`SshBuilder::key_file`] e
+/// [`SshBuilder::key`]), depois as próprias chaves e só então as outras do agente. O servidor
+/// derruba quem erra demais (o `MaxAuthTries`, 6 no OpenSSH): com muitas chaves no agente, a
+/// chave certa ofertada por último nunca chegaria.
 async fn authenticate(handle: &mut Handle<Client>, hop: &SshBuilder) -> Result<(), String> {
     let user = hop.user.as_str();
-    if hop.agent_auth && authenticate_with_agent(handle, user, hop.agent_path.as_deref()).await? {
+    // Um arquivo que não abre (não existe, falta a senha) não interrompe: o agente pode ter a
+    // chave. O erro dele só aparece se nada mais der certo.
+    let mut keys = Vec::new();
+    let mut preferred = Vec::new();
+    let mut key_error = None;
+    for source in &hop.keys {
+        match open_key(source) {
+            Ok(key) => {
+                preferred.push(key.public_key().clone());
+                keys.push(key);
+            }
+            Err(error) => {
+                if let KeySource::File(path, _) = source
+                    && let Some(public) = public_of_file(path)
+                {
+                    preferred.push(public);
+                }
+                key_error.get_or_insert(error);
+            }
+        }
+    }
+    let mut tries = 0;
+    if hop.agent_auth
+        && !preferred.is_empty()
+        && authenticate_with_agent(
+            handle,
+            user,
+            hop.agent_path.as_deref(),
+            AgentKeys::Only(&preferred),
+            &mut tries,
+        )
+        .await?
+    {
         return Ok(());
     }
-    for source in &hop.keys {
-        let key = match source {
-            KeySource::File(path, passphrase) => load_secret_key(path, passphrase.as_deref())
-                .map_err(|error| {
-                    let path = path.display();
-                    match error {
-                        russh::keys::Error::KeyIsEncrypted => {
-                            format!("a chave {path} precisa da senha")
-                        }
-                        russh::keys::Error::IO(error) => {
-                            format!(
-                                "não foi possível ler a chave {path}: {}",
-                                error_message(&error)
-                            )
-                        }
-                        _ => format!("não foi possível ler a chave {path}: {error}"),
-                    }
-                })?,
-            KeySource::Memory(key) => (**key).clone(),
-        };
+    for key in keys {
         let hash = if key.algorithm().is_rsa() {
             handle
                 .best_supported_rsa_hash()
@@ -1406,27 +1427,102 @@ async fn authenticate(handle: &mut Handle<Client>, hop: &SshBuilder) -> Result<(
         if result.success() {
             return Ok(());
         }
+        tries += 1;
+    }
+    if hop.agent_auth
+        && authenticate_with_agent(
+            handle,
+            user,
+            hop.agent_path.as_deref(),
+            AgentKeys::Except(&preferred),
+            &mut tries,
+        )
+        .await?
+    {
+        return Ok(());
     }
     let result = match &hop.password {
         Some(password) => handle.authenticate_password(user, password.clone()).await,
         None if hop.keys.is_empty() => handle.authenticate_none(user).await,
-        None => return Err(format!("autenticação recusada para {user}")),
+        None => {
+            return Err(key_error.unwrap_or_else(|| format!("autenticação recusada para {user}")));
+        }
     };
     if result.map_err(|e| ssh_error(&e))?.success() {
         Ok(())
     } else {
-        Err(format!("autenticação recusada para {user}"))
+        Err(key_error.unwrap_or_else(|| format!("autenticação recusada para {user}")))
     }
 }
 
-/// Oferece ao servidor cada chave do agente, que assina o desafio. Um agente que não existe,
-/// que não responde ou que não tem a chave do servidor não é erro: devolve `false` e a
+/// Abre a chave de `source`: lê o arquivo (com a senha, se veio) ou copia a da memória.
+fn open_key(source: &KeySource) -> Result<PrivateKey, String> {
+    match source {
+        KeySource::File(path, passphrase) => {
+            load_secret_key(path, passphrase.as_deref()).map_err(|error| {
+                let path = path.display();
+                match error {
+                    russh::keys::Error::KeyIsEncrypted => {
+                        format!("a chave {path} precisa da senha")
+                    }
+                    russh::keys::Error::IO(error) => {
+                        format!(
+                            "não foi possível ler a chave {path}: {}",
+                            error_message(&error)
+                        )
+                    }
+                    _ => format!("não foi possível ler a chave {path}: {error}"),
+                }
+            })
+        }
+        KeySource::Memory(key) => Ok((**key).clone()),
+    }
+}
+
+/// A chave pública de um arquivo de chave que não abriu (cifrado e sem a senha): a do `.pub` ao
+/// lado ou, no formato do OpenSSH, a que vai às claras dentro do próprio arquivo.
+fn public_of_file(path: &Path) -> Option<PublicKey> {
+    let mut pub_path = path.as_os_str().to_owned();
+    pub_path.push(".pub");
+    if let Ok(public) = PublicKey::read_openssh_file(Path::new(&pub_path)) {
+        return Some(public);
+    }
+    PrivateKey::read_openssh_file(path)
+        .ok()
+        .map(|key| key.public_key().clone())
+}
+
+/// Quais chaves do agente oferecer.
+#[derive(Clone, Copy)]
+enum AgentKeys<'a> {
+    /// Só as que estão na lista (as da conexão).
+    Only(&'a [PublicKey]),
+    /// Todas, menos as da lista (já oferecidas).
+    Except(&'a [PublicKey]),
+}
+
+impl AgentKeys<'_> {
+    fn offers(self, key: &PublicKey) -> bool {
+        let listed = |list: &[PublicKey]| list.iter().any(|k| k.key_data() == key.key_data());
+        match self {
+            Self::Only(list) => listed(list),
+            Self::Except(list) => !listed(list),
+        }
+    }
+}
+
+/// Oferece ao servidor as chaves do agente que `which` escolhe, e o agente assina o desafio.
+/// `tries` conta as chaves recusadas (as de antes também), para a mensagem. Um agente que não
+/// existe, que não responde ou que não tem a chave do servidor não é erro: devolve `false` e a
 /// autenticação segue. Já um agente que **recusa assinar** (a chave pede confirmação e foi
-/// negada) é erro: o servidor ficou esperando a assinatura e a conexão não serve mais.
+/// negada) é erro: o servidor ficou esperando a assinatura e a conexão não serve mais. O
+/// servidor que derruba a conexão depois de recusas demais também.
 async fn authenticate_with_agent(
     handle: &mut Handle<Client>,
     user: &str,
     path: Option<&Path>,
+    which: AgentKeys<'_>,
+    tries: &mut usize,
 ) -> Result<bool, String> {
     let Ok(mut agent) = agent_client(path).await else {
         return Ok(false);
@@ -1439,6 +1535,9 @@ async fn authenticate_with_agent(
         let AgentIdentity::PublicKey { key, .. } = identity else {
             continue;
         };
+        if !which.offers(&key) {
+            continue;
+        }
         let hash = if key.algorithm().is_rsa() {
             handle
                 .best_supported_rsa_hash()
@@ -1454,8 +1553,17 @@ async fn authenticate_with_agent(
             .await
         {
             Ok(result) if result.success() => return Ok(true),
-            Ok(_) => {}
-            Err(_) => return Err("o agente recusou usar a chave".into()),
+            Ok(_) => *tries += 1,
+            Err(russh::AgentAuthError::Send(_)) => {
+                return Err(format!(
+                    "o servidor encerrou a conexão depois de {tries} chave(s) recusada(s) (o \
+                     limite MaxAuthTries dele); ligue à conexão a chave que ele aceita",
+                    tries = *tries
+                ));
+            }
+            Err(russh::AgentAuthError::Key(_)) => {
+                return Err("o agente recusou usar a chave".into());
+            }
         }
     }
     Ok(false)

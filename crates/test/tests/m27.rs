@@ -8,7 +8,9 @@ use std::rc::Rc;
 
 use tomni_ui::prelude::*;
 use tomni_ui::terminal::{Loopback, PaneLayout, Session, TerminalPanes, move_session};
-use tomni_ui::{WindowHandle, active_window, on_close_requested, open_window};
+use tomni_ui::{
+    WindowHandle, active_window, on_close_requested, open_window, request_focus, request_focus_in,
+};
 use tomni_ui_test::TestApp;
 
 #[allow(dead_code, reason = "o `main` do exemplo não é usado no teste")]
@@ -376,4 +378,103 @@ fn a_geometria_da_janela_acompanha_a_posicao_e_o_tamanho() {
     assert_eq!(geometria.position, Some((40, 60)));
     app.close_window(outra);
     assert_eq!(outra.geometry(), None);
+}
+
+/// A mesma tela nas duas janelas, com um campo de mesmo id e um botão que pede o foco para ele.
+fn tela_com_campo(so_na_principal: bool) -> Column {
+    let coluna = Column::new()
+        .child(Edit::bind(signal(String::new())).id("campo"))
+        .child(
+            Button::new("Pedir")
+                .id("pedir")
+                .on_click(|| request_focus("campo")),
+        )
+        .child(
+            Button::new("Pedir o da principal")
+                .id("pedir-principal")
+                .on_click(|| request_focus("so-na-principal")),
+        );
+    if so_na_principal {
+        coluna.child(Edit::bind(signal(String::new())).id("so-na-principal"))
+    } else {
+        coluna
+    }
+}
+
+#[test]
+fn request_focus_atende_na_janela_de_onde_veio_o_pedido() {
+    let mut app = TestApp::new(|| {
+        tela_com_campo(true).child(Button::new("Abrir").id("abrir").on_click(|| {
+            open_window(|| tela_com_campo(false)).open();
+        }))
+    })
+    .size(400, 300);
+    app.click("abrir");
+    app.frame();
+    let principal = WindowHandle::main();
+    let outra = app.windows()[1];
+
+    // O mesmo id nas duas: quem pediu foi a segunda, e o foco fica nela.
+    app.switch_to(outra);
+    app.click("pedir");
+    app.frame();
+    assert_eq!(app.focused().as_deref(), Some("campo"));
+    app.switch_to(principal);
+    assert_ne!(app.focused().as_deref(), Some("campo"));
+
+    // E vice-versa.
+    app.click("pedir");
+    app.frame();
+    assert_eq!(app.focused().as_deref(), Some("campo"));
+    app.switch_to(outra);
+    assert_eq!(
+        app.focused().as_deref(),
+        Some("campo"),
+        "a segunda não perde o dela"
+    );
+
+    // A janela de origem não tem o widget: outra janela atende.
+    app.click("pedir-principal");
+    app.frame();
+    app.frame();
+    app.switch_to(principal);
+    assert_eq!(app.focused().as_deref(), Some("so-na-principal"));
+}
+
+#[test]
+fn request_focus_in_de_um_efeito_atende_na_janela_dada() {
+    // O efeito mora na principal e roda no quadro dela, mas quem ligou foi a outra (a ativa).
+    let ligado: Rc<Cell<Option<Signal<bool>>>> = Rc::default();
+    let guardado = Rc::clone(&ligado);
+    let mut app = TestApp::new(move || {
+        let pedir = signal(false);
+        guardado.set(Some(pedir));
+        let ativa = active_window();
+        effect(move || {
+            if pedir.get() {
+                request_focus_in(untrack(|| ativa.get()), "campo");
+            }
+        });
+        tela_com_campo(false).child(Button::new("Abrir").id("abrir").on_click(|| {
+            open_window(|| tela_com_campo(false)).open();
+        }))
+    })
+    .size(400, 300);
+    app.click("abrir");
+    app.frame();
+    let principal = WindowHandle::main();
+    let outra = app.windows()[1];
+    app.set_active_window(outra);
+
+    app.switch_to(principal);
+    ligado.get().expect("a tela guardou o signal").set(true);
+    app.frame();
+    app.frame();
+    assert_ne!(
+        app.focused().as_deref(),
+        Some("campo"),
+        "a principal não atende"
+    );
+    app.switch_to(outra);
+    assert_eq!(app.focused().as_deref(), Some("campo"));
 }

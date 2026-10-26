@@ -23,6 +23,7 @@ use crate::scroll_viewer::{
 };
 use crate::tree_view::fold_char;
 use crate::widget::{Common, Look, Widget, common_builders};
+use crate::windows::WindowHandle;
 
 /// Quantos passos o desfazer guarda.
 const UNDO_LIMIT: usize = 100;
@@ -527,10 +528,73 @@ fn find_in(text: &str, needle: &str, ignore_case: bool) -> Vec<Range<usize>> {
     found
 }
 
+/// Um pedido de [`request_focus`], [`request_focus_inside`] ou [`start_bring_into_view`]: o id do
+/// widget e a janela de onde veio. Com várias janelas, o mesmo id pode existir em mais de uma
+/// (a mesma tela montada duas vezes): a janela de origem atende primeiro e, se ela não tem um
+/// widget que sirva, o pedido passa a valer para qualquer janela.
+struct WindowRequest {
+    id: String,
+    origin: WindowHandle,
+    /// A origem já procurou e não achou: qualquer janela pode atender.
+    any: bool,
+    /// Quantos quadros da origem (ou, fechada ela, de qualquer janela) ainda procuram.
+    tries: u8,
+}
+
+/// Quantos quadros um pedido global procura o widget antes de desistir.
+const REQUEST_TRIES: u8 = 8;
+
+type Request = RefCell<Option<WindowRequest>>;
+
+fn put_request(cell: &'static std::thread::LocalKey<Request>, id: String) {
+    put_request_in(cell, WindowHandle::current(), id);
+}
+
+/// Como [`put_request`], com a janela de origem dada.
+fn put_request_in(cell: &'static std::thread::LocalKey<Request>, origin: WindowHandle, id: String) {
+    let request = WindowRequest {
+        id,
+        origin,
+        any: false,
+        tries: REQUEST_TRIES,
+    };
+    cell.with(|f| *f.borrow_mut() = Some(request));
+    crate::wake();
+}
+
+/// Entrega o pedido à árvore da janela atual se for a vez dela e `found` disser que ela tem o
+/// widget. Senão, conta um quadro (só na origem, ou em qualquer janela se a origem fechou) e
+/// deixa o pedido para as outras.
+fn claim_request(
+    cell: &'static std::thread::LocalKey<Request>,
+    found: impl Fn(&str) -> bool,
+) -> Option<String> {
+    cell.with(|f| {
+        let mut slot = f.borrow_mut();
+        let request = slot.as_mut()?;
+        let here = WindowHandle::current();
+        let origin = request.origin == here || !request.origin.is_open();
+        if !origin && !request.any {
+            return None;
+        }
+        if found(&request.id) {
+            return slot.take().map(|r| r.id);
+        }
+        if origin {
+            request.any = true;
+            request.tries = request.tries.saturating_sub(1);
+            if request.tries == 0 {
+                *slot = None;
+            }
+        }
+        None
+    })
+}
+
 thread_local! {
-    static FOCUS: RefCell<Option<String>> = const { RefCell::new(None) };
-    static FOCUS_INSIDE: RefCell<Option<String>> = const { RefCell::new(None) };
-    static REVEAL: RefCell<Option<String>> = const { RefCell::new(None) };
+    static FOCUS: Request = const { RefCell::new(None) };
+    static FOCUS_INSIDE: Request = const { RefCell::new(None) };
+    static REVEAL: Request = const { RefCell::new(None) };
     static NEXT_ID: Cell<u32> = const { Cell::new(0) };
 }
 
@@ -539,10 +603,19 @@ thread_local! {
 /// `Show`), tenta de novo por alguns quadros. Serve a quem abre uma barra de busca e quer o
 /// cursor nela. É o mesmo pedido de [`TextEditorController::focus`], sem precisar de um
 /// controlador. Chame de um evento ou de um efeito, não da construção da view.
+///
+/// Com várias janelas, a de onde veio o pedido ([`WindowHandle::current`]: a do evento) atende
+/// primeiro, mesmo que o id exista também em outra (a mesma tela montada nas duas); se ela não
+/// tem um widget com esse id que aceite o foco, o pedido passa a valer para as outras.
 pub fn request_focus(id: impl Into<String>) {
-    let id = id.into();
-    FOCUS.with(|f| *f.borrow_mut() = Some(id));
-    crate::wake();
+    put_request(&FOCUS, id.into());
+}
+
+/// Como [`request_focus`], com a janela que atende primeiro dada: para um efeito, que roda no
+/// quadro de qualquer janela, quando quem o disparou foi a janela `window` (a ativa, por
+/// exemplo, de [`active_window`](crate::active_window)).
+pub fn request_focus_in(window: WindowHandle, id: impl Into<String>) {
+    put_request_in(&FOCUS, window, id.into());
 }
 
 /// Como [`request_focus`], mas para a primeira parada de Tab **dentro** do widget com `id`
@@ -550,9 +623,7 @@ pub fn request_focus(id: impl Into<String>) {
 /// do teclado. Se o widget ainda não existe, a árvore tenta de novo por alguns quadros; se ele
 /// não tem nada que aceite foco, o pedido é descartado.
 pub fn request_focus_inside(id: impl Into<String>) {
-    let id = id.into();
-    FOCUS_INSIDE.with(|f| *f.borrow_mut() = Some(id));
-    crate::wake();
+    put_request(&FOCUS_INSIDE, id.into());
 }
 
 /// Pede para rolar os `ScrollViewer` em volta do widget com `id` até ele aparecer inteiro,
@@ -561,24 +632,23 @@ pub fn request_focus_inside(id: impl Into<String>) {
 /// quem escolhe uma linha de um `TreeView` pelo código (a linha escolhida fica sempre montada,
 /// com o id `{id da árvore}-{chave}`). Chame de um evento ou de um efeito.
 pub fn start_bring_into_view(id: impl Into<String>) {
-    let id = id.into();
-    REVEAL.with(|f| *f.borrow_mut() = Some(id));
-    crate::wake();
+    put_request(&REVEAL, id.into());
 }
 
-/// Pedido do [`start_bring_into_view`], para a árvore atender.
-pub(crate) fn take_reveal_request() -> Option<String> {
-    REVEAL.with(|f| f.borrow_mut().take())
+/// Pedido do [`start_bring_into_view`], para a árvore da janela atual atender se `found`.
+pub(crate) fn claim_reveal_request(found: impl Fn(&str) -> bool) -> Option<String> {
+    claim_request(&REVEAL, found)
 }
 
-/// Pedido de foco do [`request_focus_inside`], para a árvore atender.
-pub(crate) fn take_focus_inside_request() -> Option<String> {
-    FOCUS_INSIDE.with(|f| f.borrow_mut().take())
+/// Pedido de foco do [`request_focus_inside`], para a árvore da janela atual atender se `found`.
+pub(crate) fn claim_focus_inside_request(found: impl Fn(&str) -> bool) -> Option<String> {
+    claim_request(&FOCUS_INSIDE, found)
 }
 
-/// Pedido de foco do [`TextEditorController::focus`], para a árvore atender.
-pub(crate) fn take_focus_request() -> Option<String> {
-    FOCUS.with(|f| f.borrow_mut().take())
+/// Pedido de foco do [`request_focus`] e do [`TextEditorController::focus`], para a árvore da
+/// janela atual atender se `found`.
+pub(crate) fn claim_focus_request(found: impl Fn(&str) -> bool) -> Option<String> {
+    claim_request(&FOCUS, found)
 }
 
 /// O controlador de um [`TextEditor`]: o app o cria, passa ao editor com
@@ -723,10 +793,7 @@ impl TextEditorController {
     pub fn focus(&self) {
         let id = self.0.borrow().id.clone();
         match id {
-            Some(id) => {
-                FOCUS.with(|f| *f.borrow_mut() = Some(id));
-                crate::wake();
-            }
+            Some(id) => put_request(&FOCUS, id),
             None => self.0.borrow_mut().want_focus = true,
         }
     }
