@@ -1,0 +1,44 @@
+name: Bug / Erro
+description: Something does not work as it should. / Algo não funciona como deveria.
+labels: ["erro"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado pelo relato. Não cole senhas, chaves, tokens, arquivos `.ovpn` nem endereços
+        internos: troque por valores de exemplo.
+  - type: textarea
+    id: o-que
+    attributes:
+      label: What happened / O que aconteceu
+      description: And what you expected instead. / E o que você esperava que acontecesse.
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Steps to reproduce / Como reproduzir
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: versao
+    attributes:
+      label: Version or commit / Versão ou commit
+    validations:
+      required: true
+  - type: dropdown
+    id: sistema
+    attributes:
+      label: Operating system / Sistema
+      multiple: true
+      options: [Linux, Windows, macOS, Android, outro]
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Error message, log or screenshot / Mensagem de erro, log ou captura
+      render: text

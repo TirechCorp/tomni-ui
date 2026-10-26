@@ -1,0 +1,18 @@
+Tomni UI: tomni-ui-zerotier
+
+Este crate reimplementa em Rust o protocolo do ZeroTier (VL1 e VL2), para que o app fale com as
+máquinas da rede virtual sem placa virtual e sem administrador. Não há código C++ nem chamada
+aos binários oficiais: o formato dos pacotes, da identidade, da configuração da rede e das
+regras foi conferido contra o ZeroTier 1.x (pacotes capturados de nós de verdade e identidades
+geradas por `zerotier-idtool`), e o código do ZeroTier não foi copiado nem traduzido.
+
+ZeroTier
+  https://github.com/zerotier/ZeroTierOne
+  Copyright (c) ZeroTier, Inc.
+
+O arquivo `planet/terra.planet` é a definição pública das raízes da rede ZeroTier (o "planet"),
+que o ZeroTier distribui dentro do próprio nó sob a Mozilla Public License 2.0; ele continua
+nessa licença e é só dado (não é código). O texto da MPL-2.0 está em
+https://www.mozilla.org/MPL/2.0/. Foi extraído de uma imagem oficial do nó por
+`testes/zerotier/extrair-planet.sh`, sem alterar um byte, e tem as assinaturas de quem mantém a
+rede (o teste `tests/mundo.rs` confere).

@@ -1,0 +1,28 @@
+[package]
+name = "tomni-ui-theme"
+description = "Trait Drawer e o tema Fluent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# O código é MIT OR Apache-2.0; os ícones (icons/), do Fluent UI System Icons da Microsoft,
+# são MIT e o aviso deles vai no THIRD-PARTY-NOTICES.
+license = "(MIT OR Apache-2.0) AND MIT"
+repository.workspace = true
+
+[features]
+# Pinta o `Terminal`.
+terminal = ["dep:tomni-ui-terminal", "mono"]
+# A Cascadia Mono do `TextEditor::monospace` (o `terminal` e o `markdown` ligam).
+mono = ["tomni-ui-text/mono"]
+# Pinta o `WebView`, sem o motor do sistema.
+webview = ["dep:tomni-ui-webview"]
+
+[dependencies]
+tomni-ui-core.workspace = true
+tomni-ui-render.workspace = true
+tomni-ui-terminal = { workspace = true, optional = true }
+tomni-ui-text.workspace = true
+tomni-ui-webview = { workspace = true, optional = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,14 @@
+[package]
+name = "m9-conta"
+description = 'Tela "Minha conta" construída por uma sessão nova do Claude Code no teste de aceite do M9'
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+fluent-rs.workspace = true
+
+[dev-dependencies]
+fluent-rs-test.workspace = true

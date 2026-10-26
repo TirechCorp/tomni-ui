@@ -1,0 +1,15 @@
+[package]
+name = "tomni-ui-reactive"
+description = "Signals de granularidade fina (signal, memo, effect)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+any_spawner.workspace = true
+reactive_graph.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+# O que capturar.sh capturou (2026-10-23T02:22:17Z)
+atual: 1.14.2
+antiga: 1.4.6
+moon: 000000ed158961d1.moon
+A (id1, atual):  452308453c 172.31.70.10
+B (id2, atual, raiz da moon): ed158961d1 172.31.70.11
+C (id3, antiga): c623417e80 172.31.70.12
+--- peers de A
+200 listpeers <ztaddr> <path> <latency> <version> <role>
+200 listpeers ed158961d1 172.31.70.11/9993;647;646 13 1.14.2 MOON
+--- peers de C
+200 listpeers <ztaddr> <path> <latency> <version> <role>
+200 listpeers 34e0a5e174 - -1 - LEAF
+200 listpeers 3a46f1bf30 - -1 - LEAF
+200 listpeers 992fcf1db7 - -1 - LEAF
+200 listpeers de8950a8b2 - -1 - LEAF
+200 listpeers ed158961d1 172.31.70.11/9993;10236;224 2 1.14.2 MOON
+--- peers de B
+200 listpeers <ztaddr> <path> <latency> <version> <role>
+200 listpeers 452308453c 172.31.70.10/52434;-1;10743 0 1.14.2 LEAF
+200 listpeers c623417e80 172.31.70.12/9993;272;272 35 1.4.6 LEAF

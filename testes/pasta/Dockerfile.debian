@@ -1,0 +1,14 @@
+# O OpenSSH antigo do teste real da sonda de pasta (M64): o do Debian 12 (9.2), com o `sshd` único
+# por conexão (sem o `sshd-session`). Usuários `teste` (bash) e `peixe` (fish), senha igual ao
+# nome, com `sudo` sem senha. Senhas só de teste; nunca use numa rede de verdade.
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        openssh-server sudo bash fish procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -s /bin/bash teste && echo "teste:teste" | chpasswd \
+    && useradd -m -s /usr/bin/fish peixe && echo "peixe:peixe" | chpasswd \
+    && printf 'teste ALL=(ALL) NOPASSWD: ALL\npeixe ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/teste \
+    && mkdir -p /run/sshd \
+    && printf 'PasswordAuthentication yes\nPermitRootLogin no\n' >> /etc/ssh/sshd_config
+CMD ["/usr/sbin/sshd", "-D", "-e"]

@@ -1,0 +1,18 @@
+{
+  "Version": 113,
+  "NodeKey": "nodekey:0101010101010101010101010101010101010101010101010101010101010101",
+  "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+  "NLKey": "tlpub:0000000000000000000000000000000000000000000000000000000000000000",
+  "Auth": {
+    "AuthKey": "tskey-auth-teste"
+  },
+  "Expiry": "0001-01-01T00:00:00Z",
+  "Followup": "",
+  "Hostinfo": {
+    "IPNVersion": "tirech-omni/0.1",
+    "OS": "linux",
+    "Hostname": "tirech",
+    "ShieldsUp": true
+  },
+  "NodeKeySignature": null
+}

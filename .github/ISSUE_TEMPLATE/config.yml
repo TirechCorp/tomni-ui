@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability / Falha de segurança
+    url: https://github.com/TirechCorp/tomni-ui/security/advisories/new
+    about: "Report privately, not in a public issue. / Relate em particular, não por issue pública."

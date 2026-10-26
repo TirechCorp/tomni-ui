@@ -1,0 +1,43 @@
+# Um config de nó: o certificado, a chave e a CA por caminho relativo à pasta do config.
+pki:
+  ca: ca-25519.crt
+  cert: no-v2.crt
+  key: no-v2.key
+  blocklist:
+    - 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+static_host_map:
+  "10.42.0.1": ["127.0.0.1:14242", "lighthouse.exemplo.com:4242"]
+
+lighthouse:
+  am_lighthouse: false
+  interval: 30
+  hosts:
+    - "10.42.0.1"
+
+listen:
+  host: 0.0.0.0
+  port: 0
+
+punchy:
+  punch: true
+  respond: true
+  delay: 500ms
+
+cipher: chachapoly
+
+handshakes:
+  try_interval: 200ms
+  retries: 5
+
+tun:
+  mtu: 1200
+  unsafe_routes:
+    - route: 192.168.50.0/24
+      via: 10.42.0.25
+
+firewall:
+  outbound:
+    - port: 22
+      proto: tcp
+      host: any

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tomni-ui": {
+      "command": "tomni-ui-mcp",
+      "args": []
+    }
+  }
+}

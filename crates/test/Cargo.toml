@@ -1,0 +1,31 @@
+[package]
+name = "tomni-ui-test"
+description = "TestApp headless e harness de snapshot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui = { workspace = true, features = ["terminal", "webview-widget", "markdown", "ai"] }
+tomni-ui-core.workspace = true
+tomni-ui-reactive.workspace = true
+tomni-ui-layout.workspace = true
+tomni-ui-theme.workspace = true
+tomni-ui-render = { workspace = true, features = ["deterministic"] }
+tomni-ui-text.workspace = true
+
+[dev-dependencies]
+# Os transportes de verdade, para os testes do M17 e para o `cargo test --workspace` rodar os
+# testes deles no `tomni-ui-terminal`.
+tomni-ui = { workspace = true, features = ["terminal", "webview-widget", "pty", "serial", "ssh"] }
+
+[features]
+# Testes de IME em japonês, com a Noto Sans JP.
+cjk = ["tomni-ui/cjk"]
+# Backend GPU para os snapshots, ativado com `TOMNI_UI_BACKEND=gpu`.
+gpu = ["tomni-ui-render/gpu"]
+
+[lints]
+workspace = true

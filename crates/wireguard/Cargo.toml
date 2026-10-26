@@ -1,0 +1,42 @@
+[package]
+name = "tomni-ui-wireguard"
+description = "WireGuard do Tomni UI em Rust: o núcleo do protocolo sem E/S (handshake, cookie, transporte, replay, temporizadores), compatível com o WireGuard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# O hash do handshake, o `mac1`/`mac2` (BLAKE2s com chave, 16 bytes) e o HMAC do KDF.
+blake2 = "0.11.0"
+# O transporte (ChaCha20-Poly1305) e a caixa do cookie (XChaCha20-Poly1305).
+chacha20poly1305 = { version = "0.11.0", features = ["alloc"] }
+# As chaves (X25519). Sem `getrandom`: os números aleatórios vêm do `getrandom` do workspace.
+x25519-dalek = { version = "3.0.0", default-features = false, features = ["static_secrets", "zeroize"] }
+# As chaves no `.conf`.
+base64.workspace = true
+# Apaga da memória as chaves e os segredos do handshake.
+zeroize.workspace = true
+getrandom.workspace = true
+# A comparação dos `mac1`/`mac2` em tempo constante.
+subtle = "2.6.1"
+# O motor: a pilha TCP/IP em software, o UDP (`Underlay`) e a ponte SOCKS5 interna.
+tomni-ui-netstack.workspace = true
+# O `Proxy` que o motor devolve aos clientes do app.
+tomni-ui-net.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "sync", "time", "macros"] }
+
+[dev-dependencies]
+# Só nos testes: a implementação de referência em Rust, para a interoperabilidade. Sem os
+# recursos padrão (o `device` e o TUN); fica só o `noise::Tunn`, um núcleo sem E/S.
+boringtun = { version = "0.7.1", default-features = false }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
+# A rede simulada (`SimNet`) e o lado servidor da pilha (`listen`) dos testes do motor.
+tomni-ui-netstack = { workspace = true, features = ["test-util"] }
+# O teste real contra o WireGuard do Linux (Docker): o hash do eco e o SSH de verdade pelo proxy.
+sha2 = "0.11"
+tomni-ui-terminal = { workspace = true, features = ["ssh"] }
+
+[lints]
+workspace = true

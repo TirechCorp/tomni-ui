@@ -1,0 +1,16 @@
+[package]
+name = "tomni-ui-markdown"
+description = "MarkdownView, destaque, edição e links de Markdown para o TextEditor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-core.workspace = true
+tomni-ui-reactive.workspace = true
+pulldown-cmark.workspace = true
+
+[lints]
+workspace = true

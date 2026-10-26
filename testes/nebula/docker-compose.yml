@@ -1,0 +1,67 @@
+# A rede Nebula oficial do teste real do M48 (`crates/nebula/tests/nebula_real.rs`): três redes
+# independentes, com o mesmo CA, que diferem no que o teste confere:
+#   * `lighthouse` + `direto`          certificados v2, cifra AES-256-GCM (o padrão)
+#   * `lighthouse-chacha` + `direto-…` certificados v2, cifra ChaCha20-Poly1305
+#   * `lighthouse-v1` + `direto-v1`    certificados v1
+# O teste (no computador, fora do Docker) entra pelos lighthouses publicados em 127.0.0.1 e fala
+# com o sshd (porta 22) e o eco (porta 7) de cada `direto`. A imagem do Nebula vem de
+# NEBULA_VERSAO (o padrão é a `latest`). Chaves só de teste; nunca use numa rede de verdade.
+name: tomni-nebula
+
+x-nebula: &nebula
+  image: nebulaoss/nebula:${NEBULA_VERSAO:-latest}
+  cap_add: [NET_ADMIN]
+  devices: ["/dev/net/tun:/dev/net/tun"]
+  volumes:
+    - ${NEBULA_FIXTURES:-../../crates/nebula/tests/fixtures}:/fixtures:ro
+    - ./config:/config:ro
+
+x-servicos: &servicos
+  build: ./servicos
+  image: tomni-ui-nebula-servicos
+
+services:
+  lighthouse:
+    <<: *nebula
+    container_name: nebula-lighthouse
+    command: ["-config", "/config/lighthouse.yml"]
+    ports: ["127.0.0.1:14242:4242/udp"]
+  direto:
+    <<: *nebula
+    container_name: nebula-direto
+    command: ["-config", "/config/direto.yml"]
+    depends_on: [lighthouse]
+  servicos:
+    <<: *servicos
+    network_mode: "service:direto"
+    depends_on: [direto]
+
+  lighthouse-chacha:
+    <<: *nebula
+    container_name: nebula-lighthouse-chacha
+    command: ["-config", "/config/lighthouse-chacha.yml"]
+    ports: ["127.0.0.1:14244:4242/udp"]
+  direto-chacha:
+    <<: *nebula
+    container_name: nebula-direto-chacha
+    command: ["-config", "/config/direto-chacha.yml"]
+    depends_on: [lighthouse-chacha]
+  servicos-chacha:
+    <<: *servicos
+    network_mode: "service:direto-chacha"
+    depends_on: [direto-chacha]
+
+  lighthouse-v1:
+    <<: *nebula
+    container_name: nebula-lighthouse-v1
+    command: ["-config", "/config/lighthouse-v1.yml"]
+    ports: ["127.0.0.1:14243:4242/udp"]
+  direto-v1:
+    <<: *nebula
+    container_name: nebula-direto-v1
+    command: ["-config", "/config/direto-v1.yml"]
+    depends_on: [lighthouse-v1]
+  servicos-v1:
+    <<: *servicos
+    network_mode: "service:direto-v1"
+    depends_on: [direto-v1]

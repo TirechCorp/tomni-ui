@@ -1,0 +1,15 @@
+# Servidores do teste real da sonda de pasta (M64): o OpenSSH atual do Alpine (9.8 ou mais novo, com
+# o `sshd-session`) e o Dropbear. Usuários `teste` (bash) e `peixe` (fish), senha igual ao nome,
+# com `sudo` sem senha. Senhas só de teste; nunca use numa rede de verdade.
+FROM alpine:3.22
+RUN apk add --no-cache openssh-server dropbear sudo bash fish shadow \
+    && adduser -D -s /bin/bash teste && echo "teste:teste" | chpasswd \
+    && adduser -D -s /usr/bin/fish peixe && echo "peixe:peixe" | chpasswd \
+    && printf 'teste ALL=(ALL) NOPASSWD: ALL\npeixe ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/teste \
+    && ssh-keygen -A \
+    && mkdir -p /etc/dropbear \
+    && printf 'PasswordAuthentication yes\nPermitRootLogin no\n' >> /etc/ssh/sshd_config
+# Sem argumento sobe o OpenSSH; com `dropbear` sobe o Dropbear.
+COPY entrada-alpine.sh /entrada.sh
+RUN chmod +x /entrada.sh
+ENTRYPOINT ["/entrada.sh"]

@@ -1,0 +1,24 @@
+[package]
+name = "tomni-ui-ai"
+description = "Cliente de IA do Tomni UI: modelos de linguagem pelos dialetos compatível com OpenAI e Messages da Anthropic, com streaming cancelável"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-net = { workspace = true, features = ["http"] }
+ureq.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tomni-ui-ai = { workspace = true, features = ["test-util"] }
+
+[features]
+# O `FakeAi`, um servidor falso dos dois dialetos, para os testes dos apps.
+test-util = []
+
+[lints]
+workspace = true

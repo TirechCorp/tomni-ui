@@ -1,0 +1,19 @@
+[package]
+name = "tomni-ui-layout"
+description = "Layout flex sobre o taffy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-core.workspace = true
+slotmap.workspace = true
+taffy.workspace = true
+
+[dev-dependencies]
+tomni-ui-reactive.workspace = true
+
+[lints]
+workspace = true

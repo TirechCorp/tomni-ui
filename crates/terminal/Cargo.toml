@@ -1,0 +1,80 @@
+[package]
+name = "tomni-ui-terminal"
+description = "Widget de terminal (VT100, VT220 e xterm) com transportes de processo, Telnet, SSH e serial"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-core.workspace = true
+tomni-ui-net.workspace = true
+tomni-ui-reactive.workspace = true
+tomni-ui-text = { workspace = true, features = ["mono"] }
+unicode-width.workspace = true
+# O texto do `OSC 52` (copiar para a área de transferência) vem em base64.
+base64.workspace = true
+vte.workspace = true
+serial2 = { workspace = true, optional = true }
+russh = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+ssh-key = { workspace = true, optional = true }
+# Apaga da memória a chave privada e as passphrases (o `ssh-key` já o usa).
+zeroize = { workspace = true, optional = true }
+subtle = { version = "2.6", default-features = false, optional = true }
+# O gerador das chaves novas (o mesmo `rand` 0.10 que o `russh` usa).
+rand = { version = "0.10", default-features = false, features = ["thread_rng"], optional = true }
+# O PPK escrito à mão (`ssh/keys/ppk.rs`): Argon2id da v3, SHA-1 da v2 e os MACs. São os
+# mesmos crates, nas mesmas versões, que o `ssh-key` já puxa para ler `.ppk`.
+argon2 = { version = "0.6", default-features = false, features = ["alloc"], optional = true }
+hmac = { version = "0.13", default-features = false, optional = true }
+sha1 = { version = "0.11", default-features = false, optional = true }
+sha2 = { version = "0.11", default-features = false, optional = true }
+# O PKCS#1 privado do RSA (precisa de `dmp1` e `dmq1`, que pedem aritmética de inteiros grandes).
+rsa = { version = "0.10.0-rc.18", default-features = false, features = ["encoding"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# As chamadas do Windows (pipe com dono, janela do Pageant, tabela de processos): o único
+# crate da lib com `unsafe`.
+tomni-ui-win32 = { workspace = true, optional = true }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+portable-pty = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Chaves aleatórias nos testes do `Ssh` (o `russh` já depende dele).
+rand = { version = "0.10", features = ["thread_rng"] }
+# `serve` do agente de chaves nos testes do `Ssh`.
+futures = "0.3"
+
+[target.'cfg(windows)'.dev-dependencies]
+# O cliente do Pageant nos testes do agente (fala pela janela `WM_COPYDATA`).
+pageant = "0.2.4"
+
+[target.'cfg(unix)'.dev-dependencies]
+# `SerialPort::pair` nos testes do `Serial`.
+serial2 = { workspace = true, features = ["unix"] }
+
+[features]
+# `Process`: um programa local num pseudoterminal (fora do Android).
+pty = ["dep:portable-pty"]
+# `Serial`: uma porta serial.
+serial = ["dep:serial2"]
+# `Ssh`: um servidor SSH, com o `russh`.
+ssh = [
+    "dep:russh", "dep:tokio", "dep:ssh-key", "dep:rand", "dep:zeroize", "dep:subtle",
+    "dep:argon2", "dep:hmac", "dep:sha1", "dep:sha2", "dep:rsa", "dep:tomni-ui-win32",
+]
+
+[lints]
+workspace = true
+
+# Na documentação, as conexões de todas as features (`Process`, `Ssh`, `Serial`).
+[package.metadata.docs.rs]
+all-features = true
+
+# O teste real da sonda de pasta, contra o sshd de verdade em Docker (`testes/pasta/`).
+[[test]]
+name = "pasta_real"
+required-features = ["ssh", "pty"]

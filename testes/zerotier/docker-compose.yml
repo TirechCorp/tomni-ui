@@ -1,0 +1,62 @@
+# A rede ZeroTier oficial do teste real do M61 (`crates/zerotier/tests/zerotier_real.rs`).
+# O teste (no computador, fora do Docker) alcança os IPs da rede `zt` direto:
+#   zt       172.31.61.0/24  o computador alcança
+#   interna  172.31.62.0/24  `internal: true`, o computador não alcança
+# Os nós usam um planet de teste (gerado por `rodar.sh` em `gerado/`), com o `raiz` como único
+# raiz: nada depende da internet. Nada aqui toca o ZeroTier do computador. Chaves só de teste;
+# nunca use numa rede de verdade.
+name: tomni-zerotier
+
+x-no: &no
+  build:
+    context: ./no
+    args:
+      ZEROTIER_VERSAO: ${ZEROTIER_VERSAO:-1.14.2}
+  image: tomni-ui-zerotier-no:${ZEROTIER_VERSAO:-1.14.2}
+  cap_add: [NET_ADMIN]
+  devices: ["/dev/net/tun:/dev/net/tun"]
+  volumes:
+    - ./gerado:/gerado:ro
+    - ../../crates/zerotier/tests/fixtures:/fixtures:ro
+
+services:
+  raiz:
+    <<: *no
+    container_name: zt-raiz
+    environment: {IDENTIDADE: id1}
+    networks:
+      zt: {ipv4_address: 172.31.61.10}
+      interna: {ipv4_address: 172.31.62.10}
+  controlador:
+    <<: *no
+    container_name: zt-controlador
+    environment: {IDENTIDADE: id4, TOKEN: tokenteste}
+    networks:
+      zt: {ipv4_address: 172.31.61.11}
+  servicos:
+    <<: *no
+    container_name: zt-servicos
+    environment: {SERVICOS: "1", GATEWAY: "1"}
+    sysctls: {net.ipv4.ip_forward: 1}
+    networks:
+      zt: {ipv4_address: 172.31.61.12}
+      interna: {ipv4_address: 172.31.62.12}
+  escondido:
+    <<: *no
+    container_name: zt-escondido
+    environment: {SERVICOS: "1"}
+    networks:
+      interna: {ipv4_address: 172.31.62.20}
+  lua:
+    <<: *no
+    container_name: zt-lua
+    environment: {IDENTIDADE: id7, FAZER_MOON: "172.31.61.13/9993"}
+    networks:
+      zt: {ipv4_address: 172.31.61.13}
+
+networks:
+  zt:
+    ipam: {config: [{subnet: 172.31.61.0/24}]}
+  interna:
+    internal: true
+    ipam: {config: [{subnet: 172.31.62.0/24}]}

@@ -1,0 +1,66 @@
+[package]
+name = "tomni-ui-tailscale"
+description = "Tailscale (e Headscale) do Tomni UI em Rust: o cliente do plano de controle (ts2021), com chaves, tailcfg e registro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# O plano de controle falso (`testing::ControlFake`), para os testes do app e dos outros crates.
+test-util = []
+
+[dependencies]
+# O handshake Noise IK do ts2021 (`Noise_IK_25519_ChaChaPoly_BLAKE2s`). `risky-raw-split` entrega
+# as duas chaves de transporte: o ts2021 cifra os registros por conta própria (nonce de 64 bits
+# big-endian, diferente do `snow`).
+snow = { version = "0.10.0", default-features = false, features = ["default-resolver", "use-chacha20poly1305", "use-blake2", "use-curve25519", "use-getrandom", "risky-raw-split", "std"] }
+# Os registros do transporte Noise.
+chacha20poly1305 = { version = "0.11.0", features = ["alloc"] }
+# As chaves (X25519): máquina, nó e disco.
+x25519-dalek = { version = "3.0.0", default-features = false, features = ["static_secrets", "zeroize"] }
+# O HTTP/2 que roda dentro do Noise (`/machine/register`, `/machine/map`).
+h2 = "0.4.20"
+http = "1"
+bytes = "1"
+tokio = { workspace = true, features = ["net", "io-util", "rt", "time", "sync", "macros"] }
+# O TLS do `/key` e do `/ts2021` quando o controle é `https://`, com o `ring` e as raízes do sistema.
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+rustls.workspace = true
+rustls-native-certs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+# Apaga da memória as chaves privadas.
+zeroize.workspace = true
+getrandom.workspace = true
+# O `zstd` do mapa (`Compress: "zstd"`): o descompressor, e o compressor simples dos testes.
+# Rust puro (MIT); o crate `zstd` é binding do C e fica de fora.
+ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
+# A caixa NaCl (curve25519 + XSalsa20-Poly1305) do DERP e do disco.
+crypto_box = { version = "0.9.1", default-features = false, features = ["salsa20", "alloc"] }
+# A pilha de rede e a ponte SOCKS5 do app (o único acesso à tailnet; M48).
+tomni-ui-netstack.workspace = true
+# O `Proxy` que o motor devolve aos clientes do app.
+tomni-ui-net.workspace = true
+# O protocolo WireGuard sem E/S: o Tailscale usa o mesmo `Device`.
+tomni-ui-wireguard = { path = "../wireguard" }
+# As datas do `tailcfg` (RFC 3339).
+jiff = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+# Os testes de integração usam o `ControlFake` (feature `test-util`).
+tomni-ui-tailscale = { path = ".", features = ["test-util"] }
+# A rede simulada (UDP, NAT) e a escuta da pilha dos testes.
+tomni-ui-netstack = { workspace = true, features = ["test-util"] }
+# O teste real contra o Tailscale e o headscale oficiais (Docker): o hash do eco e o SSH de
+# verdade pelo proxy.
+sha2 = "0.11"
+tomni-ui-terminal = { workspace = true, features = ["ssh"] }
+# O certificado do TLS dos testes.
+rcgen.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "rt", "rt-multi-thread", "time", "sync", "macros"] }
+
+[lints]
+workspace = true

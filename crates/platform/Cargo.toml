@@ -1,0 +1,38 @@
+[package]
+name = "tomni-ui-platform"
+description = "Janela, input, DPI e IME via winit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-core.workspace = true
+tomni-ui-render = { workspace = true, features = ["gpu"] }
+winit.workspace = true
+pollster.workspace = true
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+arboard.workspace = true
+jiff.workspace = true
+rfd.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+window-vibrancy.workspace = true
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+tray-icon.workspace = true
+
+[target.'cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))'.dependencies]
+ksni.workspace = true
+zbus.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { workspace = true, features = ["android-native-activity"] }
+
+[dev-dependencies]
+png.workspace = true
+
+[lints]
+workspace = true

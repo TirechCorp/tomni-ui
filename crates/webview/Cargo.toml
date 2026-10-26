@@ -1,0 +1,27 @@
+[package]
+name = "tomni-ui-webview"
+description = "Widget WebView: a página da web num controle do sistema (WebView2, WKWebView, WebKitGTK)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-core.workspace = true
+tomni-ui-reactive.workspace = true
+wry = { workspace = true, optional = true }
+open = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { workspace = true, optional = true }
+webkit2gtk = { workspace = true, optional = true }
+
+[features]
+# O motor do sistema, pelo `wry` (no Linux, precisa do `libwebkit2gtk-4.1-dev` para compilar).
+# Sem ela, só o motor falso, o mesmo usado sem janela: é o que os testes do `tomni-ui-test`
+# usam. O `tomni-ui` liga com a feature `webview`.
+native = ["dep:wry", "dep:open", "dep:gtk", "dep:webkit2gtk"]
+
+[lints]
+workspace = true

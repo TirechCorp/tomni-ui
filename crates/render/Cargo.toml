@@ -1,0 +1,28 @@
+[package]
+name = "tomni-ui-render"
+description = "Trait Canvas e backends de renderização"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Habilita `CpuCanvas::deterministic`, que renderiza sem SIMD. Usado pelos snapshots.
+deterministic = ["dep:fearless_simd", "fearless_simd/force_support_fallback"]
+# Habilita `GpuCanvas` e `GpuRenderer`, com `vello` sobre `wgpu`.
+gpu = ["dep:vello", "dep:pollster"]
+
+[dependencies]
+vello_cpu.workspace = true
+peniko.workspace = true
+png.workspace = true
+image = { workspace = true, features = ["gif", "webp"] }
+zune-jpeg.workspace = true
+resvg.workspace = true
+fearless_simd = { workspace = true, optional = true }
+vello = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+
+[lints]
+workspace = true

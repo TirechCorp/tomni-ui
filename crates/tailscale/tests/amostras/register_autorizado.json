@@ -1,0 +1,1 @@
+{"User":{"ID":7,"DisplayName":"Ana","ProfilePicURL":"","Created":"2026-03-01T12:30:00.123456789Z"},"Login":{"ID":7,"Provider":"oidc","LoginName":"ana@exemplo.com","DisplayName":"Ana","ProfilePicURL":""},"NodeKeyExpired":false,"MachineAuthorized":true,"AuthURL":"","NodeKeySignature":null,"Error":"","CampoNovoDoServidor":{"x":1}}

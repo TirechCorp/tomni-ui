@@ -1,0 +1,38 @@
+[package]
+name = "tomni-ui-nebula"
+description = "Rede Nebula embutida do Tomni UI: certificados, Noise IX, túnel, lighthouse e punch, sem placa virtual nem administrador"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-net.workspace = true
+tomni-ui-netstack.workspace = true
+aes-gcm = "0.11.1"
+chacha20poly1305 = "0.11.0"
+ed25519-dalek = { version = "3.0.0", default-features = false }
+x25519-dalek = { version = "3.0.0", default-features = false }
+sha2 = "0.11"
+yaml-rust2 = { version = "0.13", default-features = false }
+base64 = "0.22.1"
+zeroize.workspace = true
+getrandom.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+# O SSH de verdade pelo proxy da rede, no teste real contra o nebula oficial.
+tomni-ui-terminal = { workspace = true, features = ["ssh"] }
+tomni-ui-nebula = { path = ".", features = ["test-util"] }
+tomni-ui-netstack = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util", "test-util"] }
+
+[features]
+# O motor com a rede em memória (`start_on`), o lighthouse de teste e o `Underlay` simulado: só os
+# testes têm.
+test-util = ["tomni-ui-netstack/test-util"]
+
+[lints]
+workspace = true

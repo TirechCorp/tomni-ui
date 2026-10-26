@@ -1,0 +1,20 @@
+[package]
+name = "tomni-ui-mcp"
+description = "Servidor MCP: ui_screenshot, ui_tree, ui_interact e ui_lint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "tomni-ui-mcp"
+path = "src/main.rs"
+
+[dependencies]
+tomni-ui-cli.workspace = true
+tomni-ui = { workspace = true, features = ["mcp"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

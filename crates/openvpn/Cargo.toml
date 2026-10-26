@@ -1,0 +1,45 @@
+[package]
+name = "tomni-ui-openvpn"
+description = "Cliente OpenVPN embutido do Tomni UI: o .ovpn, o canal de controle e o canal de dados, sem dispositivo TUN"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# O servidor de teste (o lado de lá do protocolo, em memória). Nunca é exposto ao app.
+test-util = []
+
+[dependencies]
+# O TLS do canal de controle (provedor `ring`, TLS 1.2 e 1.3), com a leitura de PEM (`rustls::pki_types`).
+rustls.workspace = true
+# Sujeito, CN, EKU e KU do certificado (verify-x509-name, remote-cert-tls).
+x509-cert.workspace = true
+# O HMAC do tls-auth e do tls-crypt, a PRF do TLS 1.0 e o AES-256-CTR do tls-crypt.
+hmac = "0.13"
+sha1 = "0.11"
+sha2 = "0.11"
+md-5 = "0.11"
+aes = "0.9"
+ctr = "0.10"
+base64.workspace = true
+getrandom.workspace = true
+zeroize.workspace = true
+# O AEAD do canal de dados (AES-GCM e ChaCha20-Poly1305); o mesmo provedor do rustls.
+ring = "0.17"
+# O motor: o transporte UDP e TCP, os timers e a thread do motor (um runtime `current_thread`).
+tokio = { workspace = true, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+# O proxy do transporte TCP (`Proxy`) e a conexão com as mensagens em português.
+tomni-ui-net.workspace = true
+# A pilha TCP/IP em software e a ponte SOCKS5 local (o único acesso do app à rede da VPN).
+tomni-ui-netstack.workspace = true
+
+[dev-dependencies]
+tomni-ui-openvpn = { path = ".", features = ["test-util"] }
+tomni-ui-netstack = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
+
+[lints]
+workspace = true

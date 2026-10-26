@@ -1,0 +1,14 @@
+[package]
+name = "m7-cadastro"
+description = "Tela de cadastro construída por uma sessão nova do Claude Code no teste de aceite do M7"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+fluent-rs.workspace = true
+
+[dev-dependencies]
+fluent-rs-test.workspace = true

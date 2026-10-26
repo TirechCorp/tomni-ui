@@ -1,0 +1,20 @@
+[package]
+name = "tomni-ui-net"
+description = "Rede do Tomni UI: o proxy (SOCKS5 e HTTP CONNECT) e a conexão TCP, com mensagens em português"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ureq = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+rustls-native-certs = { workspace = true, optional = true }
+
+[features]
+# O agente HTTP (`http::agent`) que o S3 e a IA dividem: `ureq` com o `rustls` e as raízes do sistema.
+http = ["dep:ureq", "dep:rustls", "dep:rustls-native-certs"]
+
+[lints]
+workspace = true

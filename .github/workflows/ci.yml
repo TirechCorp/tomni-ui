@@ -1,0 +1,183 @@
+# CI da lib. A versão do Rust vem do rust-toolchain.toml. Os passos foram conferidos localmente
+# no Linux (CPU, lavapipe, Intel e NVIDIA) e por `cargo clippy --target` nos outros alvos.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Formatação, clippy, docs e licenças
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - run: rustup target add x86_64-pc-windows-msvc aarch64-apple-darwin aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --features tomni-ui-test/cjk,tomni-ui-test/gpu -- -D warnings
+      # A plataforma tem código só de Android, Windows e macOS: clippy em cada alvo.
+      - name: clippy nos outros alvos
+        run: |
+          for target in x86_64-pc-windows-msvc aarch64-apple-darwin aarch64-linux-android; do
+            cargo clippy --target "$target" -p tomni-ui -p tomni-ui-platform -p tomni-ui-cli -p tomni-ui-mcp --all-targets -- -D warnings
+          done
+          # O WebView do sistema; o do macOS compila C no build e fica no job `webview`.
+          for target in x86_64-pc-windows-msvc aarch64-linux-android; do
+            cargo clippy --target "$target" -p tomni-ui --features webview --all-targets -- -D warnings
+          done
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+      # Toda tela de exemplo, nos temas claro e escuro, sem erros de acessibilidade e layout.
+      - name: tomni-ui lint nos exemplos
+        run: |
+          cargo build -p tomni-ui-cli
+          for file in crates/tomni-ui/examples/*.rs; do
+            example=$(basename "$file" .rs)
+            # Os exemplos atrás de feature (o `webview-widget` é o WebView sem o motor do sistema).
+            case "$example" in
+              terminal|terminal_panes) features=(-F terminal) ;;
+              webview) features=(-F webview-widget) ;;
+              *) features=() ;;
+            esac
+            echo "== $example"
+            target/debug/tomni-ui lint -p tomni-ui --example "$example" "${features[@]}"
+          done
+          for dir in aceite/*/; do
+            app=$(basename "$dir")
+            echo "== $app"
+            target/debug/tomni-ui lint -p "$app"
+          done
+
+  webview:
+    # O WebView com o motor do sistema: o WebKitGTK no Linux, numa tela virtual, o WebView2
+    # no Windows e o WKWebView no macOS. Fora do `cargo test --workspace`, que não pede o
+    # WebKitGTK instalado.
+    name: WebView do sistema (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev xvfb
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p tomni-ui --features webview --all-targets -- -D warnings
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a cargo test -p tomni-ui --features webview --test webview_nativo
+      - if: runner.os != 'Linux'
+        run: cargo test -p tomni-ui --features webview --test webview_nativo
+
+  msrv:
+    name: Rust 1.89 (rust-version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # O rust-toolchain.toml fixa a versão dos snapshots; o `+1.89` passa por cima dele.
+      - run: rustup toolchain install 1.89 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +1.89 check --workspace --all-targets
+
+  cpu:
+    # A referência headless: os mesmos pixels em todo sistema, com tolerância zero.
+    name: Testes CPU (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      # Versão e componentes vêm do rust-toolchain.toml.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo test -p tomni-ui-test --features cjk
+      - run: cargo test -p tomni-ui-text --features cjk
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: snapshots-cpu-${{ matrix.os }}
+          path: crates/test/snapshots/*.snap.*.png
+
+  gpu:
+    # Snapshots rasterizados na GPU e comparados com as referências da CPU (tolerância de 24
+    # níveis por canal, limite de 0,5% dos pixels). Os runners não têm GPU: o adaptador é o
+    # driver em software de cada sistema.
+    name: Testes GPU (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux, lavapipe
+            os: ubuntu-latest
+            backend: vulkan
+          - name: Windows, WARP
+            os: windows-latest
+            backend: dx12
+            adapter: Microsoft Basic Render Driver
+          - name: macOS, Metal
+            os: macos-latest
+            backend: metal
+    runs-on: ${{ matrix.os }}
+    env:
+      TOMNI_UI_BACKEND: gpu
+      WGPU_BACKEND: ${{ matrix.backend }}
+      WGPU_ADAPTER_NAME: ${{ matrix.adapter }}
+    steps:
+      - uses: actions/checkout@v5
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+      # Versão e componentes vêm do rust-toolchain.toml.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p tomni-ui-test --features gpu,cjk
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: snapshots-gpu-${{ matrix.os }}
+          path: crates/test/snapshots/*.snap.*.png
+
+  android:
+    # Os testes do tomni-ui-test (CPU) rodam no emulador e comparam com as mesmas referências.
+    name: Testes CPU (emulador Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - run: rustup target add x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-ndk --locked
+      - name: compila os testes
+        run: |
+          cargo ndk -t x86_64 test -p tomni-ui-test --features cjk --no-run --message-format=json \
+            | jq -r 'select(.profile.test == true and .executable != null) | .executable' \
+            > android-tests.txt
+          cat android-tests.txt
+      # O emulador precisa de KVM.
+      - run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          script: ./ci/android-test.sh android-tests.txt
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: snapshots-android
+          path: android-snapshots/*.snap.*.png

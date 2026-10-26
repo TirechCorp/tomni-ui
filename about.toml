@@ -1,0 +1,35 @@
+# Configuração do `cargo about`, que gera os avisos de terceiros (THIRD-PARTY-NOTICES).
+# MIT, BSD, ISC, Zlib, Unicode-3.0 e OFL exigem que o aviso de copyright acompanhe o binário:
+# vale para os exemplos deste repositório e para os apps feitos com a lib.
+#
+#   cargo about generate about.hbs -o target/THIRD-PARTY-NOTICES.txt
+#
+# A mesma lista de licenças do deny.toml.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",
+    "Unicode-3.0",
+    "ISC",
+    "BSL-1.0",
+    "OFL-1.1",
+    # 0BSD: BSD sem a cláusula de aviso, mais permissiva que a MIT (usada pelo `smoltcp`).
+    "0BSD",
+]
+# Plataformas da spec: o que entra no binário depende do alvo (ex.: windows-sys, ndk).
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+]
+# Só o que vai para o binário.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true

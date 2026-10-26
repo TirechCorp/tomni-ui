@@ -1,0 +1,4 @@
+# Versão fixa: os snapshots de pixel precisam do mesmo compilador local e no CI.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

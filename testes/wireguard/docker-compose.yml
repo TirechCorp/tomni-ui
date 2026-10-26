@@ -1,0 +1,16 @@
+# O servidor WireGuard do teste real do M57 (`crates/wireguard/tests/wireguard_real.rs`). O teste,
+# no computador (fora do Docker), entra pela porta UDP publicada em 127.0.0.1 e fala com o sshd
+# (porta 22) e o eco (porta 7) pelo endereço do túnel (10.66.0.1). O `rodar.sh` monta
+# `target/testes-wireguard/` em `/saida`: o contêiner gera as chaves e escreve ali os `.conf` dos
+# clientes. Chaves só de teste; nunca use numa rede de verdade.
+name: tomni-wireguard
+
+services:
+  wg:
+    build: .
+    image: tomni-ui-wireguard-servidor
+    container_name: wireguard-servidor
+    cap_add: [NET_ADMIN]
+    ports: ["127.0.0.1:51890:51820/udp"]
+    volumes:
+      - ${WG_SAIDA:-../../target/testes-wireguard}:/saida

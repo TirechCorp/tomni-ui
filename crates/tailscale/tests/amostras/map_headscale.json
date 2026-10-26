@@ -1,0 +1,35 @@
+{
+  "KeepAlive": false,
+  "Node": {
+    "ID": 1,
+    "Name": "tirech-omni.tailnet.exemplo.net.",
+    "User": 1,
+    "Key": "nodekey:0101010101010101010101010101010101010101010101010101010101010101",
+    "KeyExpiry": "0001-01-01T00:00:00Z",
+    "Machine": "mkey:0202020202020202020202020202020202020202020202020202020202020202",
+    "DiscoKey": "discokey:0303030303030303030303030303030303030303030303030303030303030303",
+    "Addresses": ["100.64.0.1/32"],
+    "AllowedIPs": ["100.64.0.1/32"],
+    "Endpoints": [],
+    "HomeDERP": 999,
+    "Hostinfo": {"OS": "linux", "Hostname": "tirech-omni"},
+    "Created": "2026-10-22T09:00:00Z",
+    "Online": null,
+    "LastSeen": null,
+    "MachineAuthorized": true
+  },
+  "DERPMap": {
+    "Regions": {
+      "999": {
+        "RegionID": 999,
+        "RegionCode": "headscale",
+        "RegionName": "Headscale Embedded DERP",
+        "Nodes": [{"Name": "999", "RegionID": 999, "HostName": "headscale.exemplo.net", "IPv4": "198.51.100.1", "STUNPort": 3478, "DERPPort": 443}]
+      }
+    }
+  },
+  "DNSConfig": {"Proxied": false, "Domains": ["tailnet.exemplo.net"]},
+  "Domain": "tailnet.exemplo.net",
+  "Peers": [],
+  "UserProfiles": [{"ID": 1, "LoginName": "ana", "DisplayName": "ana"}]
+}

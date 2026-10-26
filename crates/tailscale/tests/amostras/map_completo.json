@@ -1,0 +1,119 @@
+{
+  "KeepAlive": false,
+  "Node": {
+    "ID": 101,
+    "StableID": "nCNTRL101CNTRL",
+    "Name": "tirech-omni.exemplo.ts.net.",
+    "User": 5,
+    "Key": "nodekey:0101010101010101010101010101010101010101010101010101010101010101",
+    "KeyExpiry": "2027-03-01T12:00:00Z",
+    "Machine": "mkey:0202020202020202020202020202020202020202020202020202020202020202",
+    "DiscoKey": "discokey:0303030303030303030303030303030303030303030303030303030303030303",
+    "Addresses": ["100.64.0.1/32", "fd7a:115c:a1e0::1/128"],
+    "AllowedIPs": ["100.64.0.1/32", "fd7a:115c:a1e0::1/128"],
+    "Endpoints": null,
+    "HomeDERP": 0,
+    "Hostinfo": {
+      "OS": "linux",
+      "Hostname": "tirech-omni",
+      "ShieldsUp": true,
+      "Userspace": true,
+      "Services": [{"Proto": "peerapi4", "Port": 40001}],
+      "NetInfo": {"WorkingUDP": true, "PreferredDERP": 0}
+    },
+    "Created": "2026-01-10T09:30:00Z",
+    "Cap": 113,
+    "Tags": null,
+    "Online": true,
+    "MachineAuthorized": true,
+    "CapMap": {"https://tailscale.com/cap/file-sharing": []}
+  },
+  "DERPMap": {
+    "Regions": {
+      "1": {
+        "RegionID": 1,
+        "RegionCode": "sao",
+        "RegionName": "São Paulo",
+        "Latitude": -23.55,
+        "Longitude": -46.63,
+        "Nodes": [
+          {"Name": "1a", "RegionID": 1, "HostName": "derp1.exemplo.com", "IPv4": "203.0.113.10", "IPv6": "none", "STUNPort": 0, "DERPPort": 0, "CanPort80": true},
+          {"Name": "1b", "RegionID": 1, "HostName": "derp1b.exemplo.com", "STUNPort": -1}
+        ]
+      },
+      "900": {
+        "RegionID": 900,
+        "RegionCode": "teste",
+        "RegionName": "Só de teste",
+        "Avoid": true,
+        "NoMeasureNoHome": true,
+        "Nodes": [{"Name": "900a", "RegionID": 900, "HostName": "derp.teste", "InsecureForTests": true, "STUNOnly": true, "STUNPort": 3479}]
+      },
+      "2": null
+    },
+    "OmitDefaultRegions": true
+  },
+  "DNSConfig": {
+    "Resolvers": [{"Addr": "1.1.1.1"}],
+    "Routes": {
+      "empresa.interno": [{"Addr": "10.0.0.53"}],
+      "ts.net": null
+    },
+    "FallbackResolvers": [{"Addr": "https://dns.exemplo.com/dns-query"}],
+    "Domains": ["exemplo.ts.net"],
+    "Proxied": true,
+    "CertDomains": ["tirech-omni.exemplo.ts.net"],
+    "ExtraRecords": [{"Name": "grafana.exemplo.ts.net", "Type": "A", "Value": "100.64.0.50"}]
+  },
+  "Domain": "exemplo.ts.net",
+  "Peers": [
+    {
+      "ID": 102,
+      "StableID": "nCNTRL102CNTRL",
+      "Name": "servidor.exemplo.ts.net.",
+      "User": 5,
+      "Key": "nodekey:0404040404040404040404040404040404040404040404040404040404040404",
+      "KeyExpiry": "0001-01-01T00:00:00Z",
+      "Machine": "mkey:0505050505050505050505050505050505050505050505050505050505050505",
+      "DiscoKey": "discokey:0606060606060606060606060606060606060606060606060606060606060606",
+      "Addresses": ["100.64.0.2/32", "fd7a:115c:a1e0::2/128"],
+      "AllowedIPs": ["100.64.0.2/32", "fd7a:115c:a1e0::2/128", "192.168.50.0/24"],
+      "PrimaryRoutes": ["192.168.50.0/24"],
+      "Endpoints": ["198.51.100.7:41641", "[2001:db8::7]:41641", "10.0.0.7:41641"],
+      "HomeDERP": 1,
+      "Hostinfo": {"OS": "linux", "Hostname": "Servidor", "RoutableIPs": ["192.168.50.0/24"], "RequestTags": ["tag:servidor"]},
+      "Created": "2026-01-11T09:30:00Z",
+      "Cap": 113,
+      "Tags": ["tag:servidor"],
+      "LastSeen": "2026-10-21T22:15:03.5Z",
+      "Online": false,
+      "MachineAuthorized": true
+    },
+    {
+      "ID": 103,
+      "StableID": "nCNTRL103CNTRL",
+      "Name": "notebook.exemplo.ts.net.",
+      "User": 6,
+      "Key": "nodekey:0707070707070707070707070707070707070707070707070707070707070707",
+      "KeyExpiry": "2026-12-31T23:59:59Z",
+      "Machine": "mkey:0808080808080808080808080808080808080808080808080808080808080808",
+      "DiscoKey": "discokey:0909090909090909090909090909090909090909090909090909090909090909",
+      "Addresses": ["100.64.0.3/32"],
+      "AllowedIPs": ["100.64.0.3/32"],
+      "Endpoints": null,
+      "HomeDERP": 1,
+      "Hostinfo": {"OS": "windows", "Hostname": "notebook"},
+      "Created": "2026-02-01T09:30:00Z",
+      "Cap": 110,
+      "Online": true,
+      "MachineAuthorized": true
+    }
+  ],
+  "UserProfiles": [
+    {"ID": 5, "LoginName": "ana@exemplo.com", "DisplayName": "Ana", "ProfilePicURL": ""},
+    {"ID": 6, "LoginName": "bia@exemplo.com", "DisplayName": "Bia", "ProfilePicURL": "https://exemplo.com/bia.png"}
+  ],
+  "PacketFilter": [{"SrcIPs": ["*"], "DstPorts": [{"IP": "*", "Ports": {"First": 0, "Last": 65535}}]}],
+  "ControlTime": "2026-10-22T10:00:00.123456789Z",
+  "SSHPolicy": {"rules": []}
+}

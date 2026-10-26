@@ -1,0 +1,105 @@
+[package]
+name = "tomni-ui"
+description = "UI em Rust com visual Fluent, renderização própria e signals"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-core.workspace = true
+tomni-ui-reactive.workspace = true
+tomni-ui-layout.workspace = true
+tomni-ui-theme.workspace = true
+tomni-ui-render.workspace = true
+tomni-ui-text.workspace = true
+tomni-ui-platform.workspace = true
+tomni-ui-terminal = { workspace = true, optional = true }
+tomni-ui-net = { workspace = true, optional = true }
+tomni-ui-ai = { workspace = true, optional = true }
+tomni-ui-files = { workspace = true, optional = true }
+tomni-ui-webview = { workspace = true, optional = true }
+tomni-ui-markdown = { workspace = true, optional = true }
+slotmap.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+default = ["tools"]
+# O enquadramento de um servidor MCP (`tomni_ui::mcp`, M51): JSON-RPC por linha, `initialize`,
+# `tools/list`, `tools/call` e o cancelamento. Não depende da interface.
+mcp = ["dep:serde_json"]
+# Modo de ferramentas: com `TOMNI_UI_TOOLS=1`, `App::run` atende a CLI e o MCP sem abrir
+# janela. Pode ser desligado no build de distribuição (`default-features = false`).
+tools = ["dep:serde", "dep:serde_json", "tomni-ui-render/deterministic"]
+# Embute a Noto Sans JP (OFL, cerca de 4,5 MB) para chinês, japonês e coreano.
+cjk = ["tomni-ui-text/cjk"]
+# O widget `Terminal`, com a Cascadia Mono embutida (OFL, cerca de 2 MB).
+terminal = ["dep:tomni-ui-terminal", "tomni-ui-theme/terminal"]
+# A Cascadia Mono embutida (OFL) para o `TextEditor::monospace`; sem ela cai na fonte do texto.
+mono = ["tomni-ui-theme/mono"]
+# O Markdown (`tomni_ui::markdown`, M47): o `MarkdownView`, o realce e a edição para o
+# `TextEditor`; traz a Cascadia Mono embutida para os blocos de código.
+markdown = ["dep:tomni-ui-markdown", "tomni-ui-theme/mono"]
+# `terminal::Process`: um programa local num pseudoterminal, com o `portable-pty` (fora do
+# Android).
+pty = ["terminal", "tomni-ui-terminal/pty"]
+# `terminal::Serial`: uma porta serial, com o `serial2`.
+serial = ["terminal", "tomni-ui-terminal/serial"]
+# `terminal::Ssh`: SSH com o `russh` (e o `tokio` numa thread da conexão).
+ssh = ["terminal", "tomni-ui-terminal/ssh"]
+# `files`: o `Fs` (local, memória e remoto), a fila de transferências e as ferramentas de
+# caminho, e `net`, o proxy e a conexão TCP que o SSH e o SFTP dividem.
+files = ["dep:tomni-ui-files", "dep:tomni-ui-net"]
+# `files::sftp::Sftp`: o SFTP sobre o `russh-sftp`, em conexão própria ou na sessão de um
+# terminal SSH.
+sftp = ["files", "ssh", "tomni-ui-files/sftp"]
+# O FTP e o FTPS (`tomni_ui::files::ftp`), com o TLS do rustls.
+ftp = ["files", "tomni-ui-files/ftp"]
+# O S3 (`tomni_ui::files::s3`) e os compatíveis (MinIO, R2, Wasabi, B2, Spaces, Ceph).
+s3 = ["files", "tomni-ui-files/s3"]
+# O rclone (`tomni_ui::files::rclone`): as demais nuvens pelo binário `rclone rcd`.
+rclone = ["files", "tomni-ui-files/rclone"]
+# A IA (`tomni_ui::ai`, M52): os dialetos compatível com OpenAI e Messages da Anthropic, com
+# streaming cancelável, a lista de modelos e o servidor falso `FakeAi` (`ai::test_util`). Liga
+# o `files` por causa do `files::Live`, que leva a resposta da thread do pedido até a tela.
+ai = ["dep:tomni-ui-ai", "dep:tomni-ui-net", "files", "tomni-ui-ai/test-util"]
+# O widget `WebView` com o motor falso: a tela, os testes e as ferramentas, sem as
+# bibliotecas do sistema.
+webview-widget = ["dep:tomni-ui-webview", "tomni-ui-theme/webview"]
+# O `WebView` com a página de verdade, pelo `wry` (WebView2, WKWebView ou WebKitGTK; no Linux,
+# precisa da `libwebkit2gtk-4.1`).
+webview = ["webview-widget", "tomni-ui-webview/native"]
+
+[[example]]
+name = "markdown"
+required-features = ["markdown"]
+
+[[example]]
+name = "ia"
+required-features = ["ai", "markdown"]
+
+[[example]]
+name = "janelas"
+required-features = ["terminal"]
+
+[[example]]
+name = "terminal"
+required-features = ["terminal"]
+
+[[example]]
+name = "terminal_panes"
+required-features = ["terminal"]
+
+[[example]]
+name = "webview"
+required-features = ["webview-widget"]
+
+[[test]]
+name = "webview_nativo"
+harness = false
+required-features = ["webview"]
+
+[lints]
+workspace = true

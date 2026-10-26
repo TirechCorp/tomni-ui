@@ -1,0 +1,22 @@
+name: Feature request / Sugestão
+description: A new feature or an improvement. / Um recurso novo ou uma melhoria.
+labels: ["sugestão"]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: The problem / O problema
+      description: What you are trying to do and what is missing today. / O que você está tentando fazer e o que falta hoje.
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: The proposal / A proposta
+      description: How you picture it working. If it is visual, say what WinUI 3 does. / Como você imagina que funcione. Se for visual, diga o que o WinUI 3 faz.
+    validations:
+      required: true
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternatives considered / Alternativas consideradas

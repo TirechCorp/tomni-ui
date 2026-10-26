@@ -1,0 +1,19 @@
+# Três servidores FTP de verdade para conferir o cliente do M31 (`rodar.sh` sobe e derruba).
+# Todos em `network_mode: host`, cada um nas suas portas; usuário `teste`, senha `teste`.
+#
+#   vsftpd    2121 (FTP, TLS explícito)   2990 (FTPS implícito)
+#   proftpd   2122 (FTP, TLS explícito)   2991 (FTPS implícito)
+#   pure-ftpd 2123 (FTP, TLS opcional)    2124 (só com TLS)
+services:
+  vsftpd:
+    build: ./vsftpd
+    network_mode: host
+    init: true
+  proftpd:
+    build: ./proftpd
+    network_mode: host
+  pureftpd:
+    build: ./pureftpd
+    network_mode: host
+    # o pure-ftpd troca as capabilities ao subir e o Docker retira estas por padrão
+    cap_add: [SYS_NICE, DAC_READ_SEARCH]

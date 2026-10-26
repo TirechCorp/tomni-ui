@@ -1,0 +1,58 @@
+AVISOS DE TERCEIROS / THIRD-PARTY NOTICES
+
+Este software usa os componentes abaixo, distribuídos sob as licenças indicadas.
+This software uses the components below, distributed under the licenses shown.
+
+Resumo / Overview:
+{{#each overview}}
+  - {{{name}}}: {{count}}
+{{/each}}
+
+Com o WebView (feature `webview`), o app usa o navegador do sistema, que não vai no binário:
+o runtime do Microsoft Edge WebView2 no Windows, o WKWebView no macOS e o WebKitGTK
+(LGPL-2.1, https://webkitgtk.org) no Linux.
+With the WebView (`webview` feature), the app uses the system browser engine, which is not
+bundled: the Microsoft Edge WebView2 Runtime on Windows, WKWebView on macOS and WebKitGTK
+(LGPL-2.1, https://webkitgtk.org) on Linux.
+
+A rede embutida (crates `tomni-ui-nebula` e `tomni-ui-netstack`) reimplementa em Rust o protocolo
+do Nebula (https://github.com/slackhq/nebula, MIT, Copyright (c) 2018-2019 Slack Technologies,
+Inc.), cujo desenho e partes do código foram portados; não há código Go nem binário do Nebula.
+The embedded network (`tomni-ui-nebula` and `tomni-ui-netstack` crates) reimplements the Nebula
+protocol (https://github.com/slackhq/nebula, MIT, Copyright (c) 2018-2019 Slack Technologies,
+Inc.) in Rust; its design and parts of its code were ported, and no Go code or Nebula binary is
+shipped.
+
+O WireGuard embutido (crate `tomni-ui-wireguard`) reimplementa em Rust o protocolo do WireGuard
+(wireguard-go, MIT, Copyright (C) 2017-2023 WireGuard LLC), e o Tailscale embutido (crate
+`tomni-ui-tailscale`) reimplementa o cliente do Tailscale (https://github.com/tailscale/tailscale,
+BSD-3-Clause, Copyright (c) Tailscale Inc & AUTHORS); o desenho e partes do código foram
+portados, e não há código Go nem binário deles. "WireGuard" é marca registrada de Jason A.
+Donenfeld.
+The embedded WireGuard (`tomni-ui-wireguard` crate) reimplements the WireGuard protocol in Rust
+(wireguard-go, MIT, Copyright (C) 2017-2023 WireGuard LLC), and the embedded Tailscale
+(`tomni-ui-tailscale` crate) reimplements the Tailscale client
+(https://github.com/tailscale/tailscale, BSD-3-Clause, Copyright (c) Tailscale Inc & AUTHORS);
+their design and parts of their code were ported, and no Go code or binaries of them are
+shipped. "WireGuard" is a registered trademark of Jason A. Donenfeld.
+O ZeroTier embutido (crate `tomni-ui-zerotier`) reimplementa em Rust o protocolo do ZeroTier
+(https://github.com/zerotier/ZeroTierOne, Copyright (c) ZeroTier, Inc.); o formato foi conferido
+contra o ZeroTier 1.x, não há código C++ nem binário dele, e o arquivo `terra.planet` (a lista
+pública das raízes) é distribuído sob a Mozilla Public License 2.0, sem alteração.
+The embedded ZeroTier (`tomni-ui-zerotier` crate) reimplements the ZeroTier protocol in Rust
+(https://github.com/zerotier/ZeroTierOne, Copyright (c) ZeroTier, Inc.); the format was checked
+against ZeroTier 1.x, no C++ code or binary of it is shipped, and the `terra.planet` file (the
+public list of roots) is distributed under the Mozilla Public License 2.0, unmodified.
+
+{{#each licenses}}
+
+================================================================================
+{{{name}}}
+
+Usada por / Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+--------------------------------------------------------------------------------
+{{{text}}}
+{{/each}}

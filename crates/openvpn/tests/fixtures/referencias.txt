@@ -1,0 +1,66 @@
+ca.sha256=dd58b115f90d0653a7e5d5e951c1ceaa842d2d7e6b69b883886668fc5e77e3d6
+ca.sha1=9f82265dbb9f2f38fed12b4679077e83ea5c472b
+ca.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=Tomni Teste CA
+ca.notAfter=2108003437
+ca.notBefore=1792643437
+ca-ec.sha256=3596c2bb26147db245b3a8f3dc2630d4100a3b14cf651190585318413f325dce
+ca-ec.sha1=ff03491390bf801ee33f6b3bc2a2091fb44362d7
+ca-ec.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=Tomni Teste CA EC
+ca-ec.notAfter=2108003437
+ca-ec.notBefore=1792643437
+ca-sha1.sha256=b9cb4f12bc34d72d1bb1da272b7750196e3b48e5fe8358ece61422042f847cba
+ca-sha1.sha1=c9091c56fcc2b4a2b3c35f51dd794f0bc5297779
+ca-sha1.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=Tomni Teste CA SHA1
+ca-sha1.notAfter=2108003437
+ca-sha1.notBefore=1792643437
+outra-ca.sha256=90cf99474bf4be9ea777f51508b45d35961b7a3c18b901c722fa34cb86a4a35b
+outra-ca.sha1=0b62111adc70f665947aa3a15b55da13bff8d289
+outra-ca.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=Outra CA de Teste
+outra-ca.notAfter=2108003437
+outra-ca.notBefore=1792643437
+servidor.sha256=4a975eaa22d80c54a5f95a281791f5671810b197fd3c8a6f02336352e1000390
+servidor.sha1=7b7350dd952605a1ffe877aa2bdba39e7f9cbed8
+servidor.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=servidor
+servidor.notAfter=2108003437
+servidor.notBefore=1792643437
+servidor-sem-eku.sha256=c950d596cc53f6cb4a34c2227337d1fdc0ca7bf26b01bf4e63eff2d88eb03367
+servidor-sem-eku.sha1=13a726027614221a731a44e5a241e11cffca625c
+servidor-sem-eku.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=servidor-sem-eku
+servidor-sem-eku.notAfter=2108003438
+servidor-sem-eku.notBefore=1792643438
+servidor-ec.sha256=df1b9ffc387138a9da8e82da6f7e58aa37b24b2f9c6512d9c994a3493233e8f2
+servidor-ec.sha1=3aa72616b0402ddf900b1d98d0b490ac9278bd50
+servidor-ec.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=servidor-ec
+servidor-ec.notAfter=2108003438
+servidor-ec.notBefore=1792643438
+servidor-outra-ca.sha256=48f5cc548020886e272034ed91af95ede6c759332b0303a37ce654856b4c432c
+servidor-outra-ca.sha1=1a5fb044268adb1ed373e5c9c7d71353992a35c5
+servidor-outra-ca.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=servidor
+servidor-outra-ca.notAfter=2108003438
+servidor-outra-ca.notBefore=1792643438
+cliente-rsa.sha256=49b45d2cdc79268e32a1c0fce344321d33059c2d996bf350dfd79f1470436a56
+cliente-rsa.sha1=8ed91d3434fdd27050007dc531ca850b48ea54f1
+cliente-rsa.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=cliente-rsa
+cliente-rsa.notAfter=2108003438
+cliente-rsa.notBefore=1792643438
+cliente-ec.sha256=5e2105ceb8f91e3f6ec6d13826c9c99a7e10048ef0771581dc3693646da690e8
+cliente-ec.sha1=7a84d1a173bf584935e7898922a81522ad684f09
+cliente-ec.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=cliente-ec
+cliente-ec.notAfter=2108003439
+cliente-ec.notBefore=1792643439
+cliente-vencido.sha256=e91b4c3743f9c7d4012e97c59b003eca93ec149d3910da8ed40d5863c67ecd76
+cliente-vencido.sha1=6b3b41a74c1a5014486b90b2de0372b7885f9cf7
+cliente-vencido.subject=CN=cliente-vencido
+cliente-vencido.notAfter=1580515200
+cliente-vencido.notBefore=1577836800
+cliente-outra-ca.sha256=2ab614603699c6307efb738c2a695cf6dce04fe47f8f333377c6b07414e36b18
+cliente-outra-ca.sha1=3ec760b27ba0325b69298eb564f226df8cf5edf5
+cliente-outra-ca.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=cliente-outra-ca
+cliente-outra-ca.notAfter=2108003439
+cliente-outra-ca.notBefore=1792643439
+cliente-sha1.sha256=1cbf37bea86d9efa72f9338a293db5d1d13310b8905876d1e4b1c12be4ac61f2
+cliente-sha1.sha1=6388eaee41d19b433c8af8a56fc64fdddf5df45e
+cliente-sha1.subject=C=BR, ST=Sao Paulo, L=Sao Paulo, O=Tomni Teste, OU=Fixtures, CN=cliente-sha1
+cliente-sha1.notAfter=2108003439
+cliente-sha1.notBefore=1792643439
+senha_chave=senha-de-teste

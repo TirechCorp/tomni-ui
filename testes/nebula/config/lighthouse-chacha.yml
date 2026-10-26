@@ -1,0 +1,34 @@
+# O lighthouse oficial do teste real do M48 (certificado lighthouse-chacha). Chaves só de teste.
+pki:
+  ca: /fixtures/ca-25519.crt
+  cert: /fixtures/lighthouse-chacha.crt
+  key: /fixtures/lighthouse-chacha.key
+
+lighthouse:
+  am_lighthouse: true
+
+listen:
+  host: 0.0.0.0
+  port: 4242
+
+punchy:
+  punch: true
+
+# O lighthouse não leva tráfego de dados: dispensa a placa virtual.
+tun:
+  disabled: true
+
+cipher: chachapoly
+
+logging:
+  level: info
+
+firewall:
+  outbound:
+    - port: any
+      proto: any
+      host: any
+  inbound:
+    - port: any
+      proto: any
+      host: any

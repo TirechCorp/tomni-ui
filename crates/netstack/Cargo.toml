@@ -1,0 +1,35 @@
+[package]
+name = "tomni-ui-netstack"
+description = "Pilha TCP/IP em software do Tomni UI (smoltcp) sobre um túnel de pacotes IP, com a ponte SOCKS5 local"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-net.workspace = true
+# Fixado em `=0.12.0`: a 0.13 e a 0.14 pedem o Rust 1.91, acima da MSRV 1.89 da lib. A 0.12.0 pede
+# o 1.80. Subir a MSRV para usar a 0.14 é decisão do dono da lib, e a troca fica contida neste
+# crate. Sem os recursos padrão: só a pilha TCP sobre pacotes IPv4 (o IPv6 é adiável, M48).
+# `socket-tcp-cubic` liga o controle de congestionamento Cubic, que a 0.12 já tem: sem ele, o TCP
+# dela não segura a janela em redes com perda.
+smoltcp = { version = "=0.12.0", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "socket-tcp", "socket-tcp-cubic"] }
+tokio = { workspace = true, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+getrandom.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tomni-ui-netstack = { path = ".", features = ["test-util"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util", "test-util"] }
+
+[features]
+# O lado servidor (`NetStack::listen`) e o `pipe`, que liga duas pilhas em memória: só os testes
+# têm o lado servidor, porque o app só abre conexões.
+test-util = []
+# O meio Ethernet (`ethernet`): um `FrameTunnel` (quadros) vira um `PacketTunnel` (pacotes IP), com
+# ARP e rotas com gateway. Para o ZeroTier; os outros túneis não usam.
+ethernet = []
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "tomni-ui-core"
+description = "Árvore de widgets, foco e eventos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-reactive.workspace = true
+kurbo.workspace = true
+raw-window-handle.workspace = true
+slotmap.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true

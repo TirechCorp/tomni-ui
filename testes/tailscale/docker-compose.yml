@@ -1,0 +1,71 @@
+# O ambiente do teste real do M57 (Tailscale), em Docker:
+#   headscale  o servidor de controle oficial, com o DERP embutido; TLS em 127.0.0.1:18443
+#   direto     tailscale oficial (userspace), sshd e eco; anuncia a sub-rede interna
+#   escondido  tailscale oficial que só usa o DERP (TS_DEBUG_ALWAYS_USE_DERP)
+#   alvo       só sshd e eco, na rede interna (o computador não a alcança; só o `direto` sim)
+# O `rodar.sh` monta `target/testes-tailscale/` em `/saida` (certificados, chave de autenticação).
+name: tomni-tailscale
+
+services:
+  headscale:
+    image: headscale/headscale:${HEADSCALE_VERSAO:-latest}
+    container_name: tomni-ts-headscale
+    command: serve
+    ports:
+      - "127.0.0.1:18443:8443"
+      - "127.0.0.1:3478:3478/udp"
+    volumes:
+      - ./headscale.yaml:/etc/headscale/config.yaml:ro
+      - ./:/politicas:ro
+      - ${TS_SAIDA:-../../target/testes-tailscale}:/saida:ro
+      - headscale-dados:/var/lib/headscale
+      - headscale-socket:/var/run/headscale
+    networks: [externa]
+
+  direto: &no
+    build:
+      context: .
+      args:
+        TAILSCALE_VERSAO: ${TAILSCALE_VERSAO:-latest}
+    image: tomni-ui-tailscale-no
+    container_name: tomni-ts-direto
+    environment:
+      PAPEL: no
+      NOME: direto
+      ROTAS: 10.99.0.0/24
+    volumes:
+      - ${TS_SAIDA:-../../target/testes-tailscale}:/saida:ro
+    networks: [externa, interna]
+    depends_on: [headscale]
+
+  escondido:
+    <<: *no
+    container_name: tomni-ts-escondido
+    environment:
+      PAPEL: no
+      NOME: escondido
+      ROTAS: ""
+      TS_DEBUG_ALWAYS_USE_DERP: "true"
+    networks: [externa]
+
+  alvo:
+    <<: *no
+    container_name: tomni-ts-alvo
+    environment:
+      PAPEL: alvo
+    networks:
+      interna:
+        ipv4_address: 10.99.0.10
+    depends_on: []
+
+networks:
+  externa: {}
+  interna:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.99.0.0/24
+
+volumes:
+  headscale-dados: {}
+  headscale-socket: {}

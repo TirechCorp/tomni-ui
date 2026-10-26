@@ -1,0 +1,220 @@
+# Ícones do `Symbol`, por categoria. Uma linha por ícone: o nome do Fluent (a pasta em
+# `assets/`, em minúsculas e com `_`), opcionalmente seguido do nome da variante no enum.
+# `nome:filled` usa a variante cheia. Depois de mudar, rode `python3 -I gerar.py <cache>`.
+
+## Navegação
+home
+arrow_left
+arrow_right
+arrow_up
+arrow_down
+chevron_left
+chevron_right
+chevron_up
+chevron_down
+navigation
+more_horizontal
+more_vertical
+open
+arrow_clockwise
+arrow_counterclockwise
+arrow_sync
+arrow_undo
+arrow_redo
+arrow_exit
+sign_out
+arrow_enter
+grid
+apps
+apps_list
+panel_left
+panel_right
+panel_bottom
+split_vertical
+split_horizontal
+globe
+map
+location
+compass_northwest Compass
+search
+filter
+arrow_sort
+zoom_in
+zoom_out
+full_screen_maximize
+full_screen_minimize
+maximize
+dismiss
+
+## Ações
+add
+subtract
+edit
+delete
+save
+copy
+cut
+clipboard_paste
+share
+send
+print
+checkmark
+pin
+pin_off
+star
+star:filled
+star_off
+heart
+heart:filled
+bookmark
+bookmark:filled
+flag
+tag
+link
+attach
+archive
+rename
+lock_closed
+lock_open
+key
+eye
+eye_off
+options
+arrow_reply
+arrow_forward
+arrow_download
+arrow_upload
+cloud
+cloud_arrow_up
+cloud_arrow_down
+select_all_on SelectAll
+
+## Arquivos e conteúdo
+document
+document_add
+document_text
+folder
+folder_open
+folder_add
+image
+image_multiple
+video
+music_note_2 MusicNote
+code
+database
+server
+clipboard
+notepad
+book
+library
+briefcase
+box
+
+## Status
+info
+warning
+error_circle
+checkmark_circle
+dismiss_circle
+question_circle
+alert
+alert_off
+shield
+shield_checkmark
+clock
+history
+calendar
+hourglass
+circle
+circle:filled
+sparkle
+lightbulb
+bug
+wifi_1 Wifi
+battery_10 Battery
+flash
+
+## Mídia
+play
+pause
+stop
+previous
+next
+record
+speaker_2 Speaker
+speaker_mute
+mic
+mic_off
+camera
+headphones
+fast_forward
+rewind
+live Broadcast
+
+## Sistema e pessoas
+settings
+person
+people
+person_add
+person_circle
+color
+paint_brush
+dark_theme
+weather_moon
+weather_sunny
+desktop
+laptop
+phone
+tablet
+keyboard
+window
+window_new
+plug_connected
+power
+accessibility
+local_language
+text_font
+wrench
+toolbox
+
+## Comunicação
+mail
+chat
+chat_multiple
+comment
+call
+megaphone
+
+## Texto
+text_bold
+text_italic
+text_underline
+text_strikethrough
+text_align_left
+text_align_center
+text_align_right
+text_bullet_list_ltr TextBulletList
+text_number_list_ltr TextNumberList
+text_header_1
+table
+task_list_ltr
+text_quote
+line_horizontal_1
+code_block
+
+## Desenvolvimento
+branch
+window_console
+puzzle_piece
+beaker
+
+## Diversos
+cart
+money
+gift
+trophy
+rocket
+emoji
+thumb_like
+thumb_like:filled
+thumb_dislike

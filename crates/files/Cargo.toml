@@ -1,0 +1,62 @@
+[package]
+name = "tomni-ui-files"
+description = "Arquivos locais e remotos do Tomni UI: o trait Fs, a Remote, a fila de transferências e o SFTP"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tomni-ui-core.workspace = true
+tomni-ui-reactive.workspace = true
+tomni-ui-net = { workspace = true }
+tomni-ui-terminal = { workspace = true, optional = true, features = ["ssh"] }
+russh = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+russh-sftp = { version = "3.0.1", optional = true }
+rustls = { workspace = true, optional = true }
+rustls-native-certs = { workspace = true, optional = true }
+x509-cert = { workspace = true, optional = true }
+sha2 = { version = "0.10.9", optional = true }
+rusty-s3 = { workspace = true, optional = true }
+ureq = { workspace = true, optional = true }
+mime_guess = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
+quick-xml = { workspace = true, optional = true }
+percent-encoding = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+fs4.workspace = true
+
+[dev-dependencies]
+tomni-ui-reactive.workspace = true
+# Liga o `MemFs` nos testes de integração.
+tomni-ui-files = { workspace = true, features = ["test-util", "sftp", "ftp", "s3", "rclone"] }
+tomni-ui-terminal = { workspace = true, features = ["ssh"] }
+russh.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+russh-sftp = "3.0.1"
+rand = { version = "0.10", features = ["thread_rng"] }
+rustls.workspace = true
+rcgen.workspace = true
+
+[features]
+# O SFTP (`Sftp`), pelo `russh-sftp`, numa conexão própria ou num canal da sessão SSH aberta.
+sftp = ["dep:tomni-ui-terminal", "dep:russh", "dep:tokio", "dep:russh-sftp"]
+# O FTP e o FTPS (`Ftp`), um cliente próprio e bloqueante, com o TLS do `rustls`.
+ftp = ["dep:rustls", "dep:rustls-native-certs", "dep:x509-cert", "dep:sha2"]
+# O S3 (`S3`) e os compatíveis (MinIO, R2, Wasabi, B2, Spaces, Ceph): `rusty-s3` assina e lê o XML,
+# `ureq` faz o HTTP, com o `rustls` e as raízes do sistema.
+s3 = ["tomni-ui-net/http", "dep:rusty-s3", "dep:ureq", "dep:mime_guess", "dep:jiff", "dep:quick-xml", "dep:percent-encoding", "dep:url"]
+# O rclone (`Rclone`, `Rcd`): fala com o binário `rclone` pela API do `rclone rcd`, em
+# `127.0.0.1`. O `ureq` sem TLS, porque a conversa é local.
+rclone = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:getrandom", "dep:base64", "dep:percent-encoding", "dep:jiff"]
+# O `MemFs`, um sistema de arquivos em memória para os testes das telas.
+test-util = []
+
+[lints]
+workspace = true

@@ -1,0 +1,35 @@
+# Licenças permitidas pela spec: MIT, Apache-2.0, BSD, ISC, BSL-1.0, Zlib, Unicode-3.0, 0BSD e OFL
+# (fontes).
+# Rode com `cargo deny check licenses`. Os avisos de terceiros saem de `cargo about` (about.toml).
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    # foldhash e zlib-rs.
+    "Zlib",
+    # Dados e código ICU4X, via parley.
+    "Unicode-3.0",
+    # libloading, via wgpu-hal e winit (M4). Equivale à MIT.
+    "ISC",
+    # clipboard-win e error-code, via arboard no Windows (M4).
+    "BSL-1.0",
+    "OFL-1.1",
+    # `ksni`, a bandeja no Linux. Domínio público, sem restrição nenhuma.
+    "Unlicense",
+    # 0BSD: BSD sem a cláusula de aviso, mais permissiva que a MIT (usada pelo `smoltcp`).
+    "0BSD",
+]
+# `option-ext` (MPL-2.0) é do `dirs`, que o `tray-icon` usa só no Linux e nos BSDs. Lá a
+# bandeja é o `ksni`, e o `tray-icon` só entra no Windows e no macOS (`cargo tree -i option-ext
+# --target <alvo>` não acha nada em nenhum alvo suportado). O `deny` junta as arestas de todos
+# os alvos num grafo só e por isso o vê. Nunca entra num binário nosso.
+exceptions = [{ allow = ["MPL-2.0"], crate = "option-ext" }]
+confidence-threshold = 0.9
+# A lista acima é a política da spec, não só o que as dependências de hoje usam.
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "warn"

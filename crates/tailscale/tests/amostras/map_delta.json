@@ -1,0 +1,23 @@
+{
+  "PeersChanged": [
+    {
+      "ID": 104,
+      "StableID": "nCNTRL104CNTRL",
+      "Name": "nova.exemplo.ts.net.",
+      "User": 5,
+      "Key": "nodekey:0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+      "DiscoKey": "discokey:0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "Addresses": ["100.64.0.4/32"],
+      "AllowedIPs": ["100.64.0.4/32"],
+      "HomeDERP": 1,
+      "Online": true,
+      "MachineAuthorized": true
+    }
+  ],
+  "PeersRemoved": [103],
+  "PeersChangedPatch": [
+    {"NodeID": 102, "DERPRegion": 1, "Endpoints": ["198.51.100.7:41700"], "Online": true, "LastSeen": "2026-10-22T10:05:00Z"}
+  ],
+  "OnlineChange": {"102": true},
+  "PeerSeenChange": {"nodekey:0404040404040404040404040404040404040404040404040404040404040404": true}
+}

@@ -1,0 +1,40 @@
+[package]
+name = "tomni-ui-zerotier"
+description = "ZeroTier embutido do Tomni UI: identidade, VL1 (pares, raízes, NAT) e VL2 (redes virtuais) em Rust, sem placa virtual nem administrador"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ed25519-dalek = { version = "3.0.0", default-features = false }
+x25519-dalek = { version = "3.0.0", default-features = false }
+sha2 = "0.11.1"
+hmac = "0.13.0"
+ghash = "0.6.0"
+salsa20 = "0.11.0"
+poly1305 = "0.9.1"
+aes = "0.9.3"
+ctr = "0.10.1"
+lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
+zeroize.workspace = true
+getrandom.workspace = true
+tomni-ui-netstack = { workspace = true, features = ["ethernet"] }
+tomni-ui-net.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "sync", "time", "macros"] }
+
+[dev-dependencies]
+tomni-ui-zerotier = { path = ".", features = ["test-util"] }
+tomni-ui-netstack = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util", "test-util"] }
+serde_json.workspace = true
+# O SSH de verdade pela ponte da rede, no teste real contra o zerotier-one oficial.
+tomni-ui-terminal = { workspace = true, features = ["ssh"] }
+
+[features]
+# A raiz e o controlador de teste e a rede em memória: só os testes têm.
+test-util = ["tomni-ui-netstack/test-util"]
+
+[lints]
+workspace = true

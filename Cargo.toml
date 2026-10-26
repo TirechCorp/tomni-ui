@@ -1,0 +1,154 @@
+[workspace]
+resolver = "3"
+# `aceite/`: apps escritos por agentes nos testes de aceite, conferidos a cada mudança na lib.
+# O app de verdade feito com a lib, o Tirech Omni, tem repositório próprio (`tirech-omni`).
+members = ["crates/*", "aceite/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/TirechCorp/tomni-ui"
+
+[workspace.dependencies]
+# Crates internos (camadas do diagrama de arquitetura).
+tomni-ui = { path = "crates/tomni-ui" }
+tomni-ui-core = { path = "crates/core" }
+tomni-ui-reactive = { path = "crates/reactive" }
+tomni-ui-layout = { path = "crates/layout" }
+tomni-ui-theme = { path = "crates/theme" }
+tomni-ui-render = { path = "crates/render" }
+tomni-ui-text = { path = "crates/text" }
+tomni-ui-platform = { path = "crates/platform" }
+tomni-ui-test = { path = "crates/test" }
+tomni-ui-cli = { path = "crates/cli" }
+tomni-ui-net = { path = "crates/net" }
+# A pilha TCP/IP em software e a ponte SOCKS5 sobre o túnel Nebula.
+tomni-ui-netstack = { path = "crates/netstack" }
+# A rede Nebula embutida (certificados, Noise IX, túnel, lighthouse e punch; M48).
+tomni-ui-nebula = { path = "crates/nebula" }
+# O ZeroTier embutido (VL1 e VL2 em Rust, só para o tráfego do app; M61).
+tomni-ui-zerotier = { path = "crates/zerotier" }
+tomni-ui-ai = { path = "crates/ai" }
+tomni-ui-files = { path = "crates/files" }
+tomni-ui-terminal = { path = "crates/terminal" }
+# As chamadas Win32 com unsafe; só no Windows.
+tomni-ui-win32 = { path = "crates/win32" }
+tomni-ui-webview = { path = "crates/webview", default-features = false }
+tomni-ui-markdown = { path = "crates/markdown" }
+# Os apps de `aceite/` ficam como os agentes entregaram, com `use fluent_rs`: estes nomes
+# antigos apontam para os crates de hoje.
+fluent-rs = { package = "tomni-ui", path = "crates/tomni-ui" }
+fluent-rs-test = { package = "tomni-ui-test", path = "crates/test" }
+
+# Externos. Todos MIT, Apache-2.0 ou dupla licença (ver deny.toml).
+# peniko e kurbo são compartilhados por vello, vello_cpu e parley: manter as versões alinhadas.
+peniko = "0.6.1"
+# Mesma versão reexportada pelo peniko; o core usa só a geometria (Rect, Point, Size).
+kurbo = "0.13.1"
+vello = "0.11.0"
+# Espera o adaptador e a leitura da textura da GPU sem executor assíncrono.
+pollster = "0.4.0"
+# Seletor de arquivo. Sem a feature padrão `wayland`, que exige a libwayland-client do sistema
+# (pkg-config); no Linux usa o portal XDG e cai no zenity.
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+# Clipboard do sistema no desktop (Windows, Linux X11/Wayland, macOS).
+arboard = { version = "3.6.1", default-features = false, features = ["image-data"] }
+vello_cpu = { version = "0.3.0", features = ["f32_pipeline"] }
+# Mesma versão usada pelo vello_cpu; só serve para liberar o nível escalar (`Level::fallback`).
+fearless_simd = { version = "0.7.0", default-features = false }
+# Sem fontes do sistema: o texto usa só a Selawik embutida, para os pixels não variarem.
+parley = { version = "0.12.0", default-features = false, features = ["std"] }
+# Só flexbox: `Column` e `Row` não precisam de grid, block nem float.
+taffy = { version = "0.15.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid"] }
+winit = "0.30.13"
+# A janela do app como mãe dos controles nativos, na versão usada pelo winit e pelo wry.
+raw-window-handle = "0.6.2"
+# Mica do Windows 11: a chamada ao DWM sem `unsafe` próprio. Só no Windows.
+window-vibrancy = "0.8.1"
+# A bandeja do sistema. No Windows e no macOS, o `tray-icon` (MIT OR Apache-2.0) com o
+# menu do `muda` que ele reexporta; fixado abaixo da 0.25 (e do `muda` 0.20), que pedem o Rust
+# 1.90. Sem a feature padrão, que puxa o GTK e o `libxdo`.
+tray-icon = { version = "0.24.2", default-features = false }
+# A bandeja no Linux: o StatusNotifierItem em D-Bus puro, sem GTK. Única dependência com
+# a licença Unlicense (ver deny.toml). Sem o tokio: o `async-io` e a API bloqueante.
+ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
+# O D-Bus do `ksni` (MIT), na versão dele: aqui só pergunta se o `StatusNotifierWatcher` existe.
+zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
+# Protocolo das ferramentas para agentes (CLI e MCP) com o app, e o JSON-RPC do MCP.
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+# A senha aleatória do `rclone rcd` e o base64 da autenticação dele.
+getrandom = "0.3.4"
+base64 = "0.22.1"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+# Adotado no M1. Só o tomni-ui-reactive importa: o resto usa a fachada.
+reactive_graph = { version = "0.2.16", features = ["effects"] }
+# Mesma versão usada pelo reactive_graph; o runtime instala nele o executor de frame.
+any_spawner = "0.3.0"
+# Decodificação das imagens do `Image`, no tomni-ui-render. O `zune-jpeg` sem SIMD para
+# os pixels não variarem entre máquinas; o `resvg` sem texto, fontes do sistema nem imagens
+# embutidas no SVG.
+png = "0.18.1"
+# O espaço livre do disco, o `available_space` do `tomni-ui-files`.
+fs4 = { version = "1.1.0", default-features = false, features = ["sync"] }
+# GIF e WebP do `Image`; o `arboard` já traz o `image` para a área de transferência.
+image = { version = "0.25.10", default-features = false }
+zune-jpeg = { version = "0.5.15", default-features = false, features = ["std"] }
+resvg = { version = "0.48.1", default-features = false }
+# Terminal: o parser das sequências de escape e a largura dos caracteres (os do CJK
+# ocupam duas células).
+vte = { version = "0.15.0", default-features = false, features = ["std"] }
+portable-pty = "0.9.0"
+serial2 = "0.2.38"
+russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa", "flate2"] }
+tokio = { version = "1", default-features = false }
+# O Win32 do `tomni-ui-win32`, na versão que o `Cargo.lock` já tinha; cada feature é pedida lá.
+windows = "0.62.2"
+# Chaves SSH: gerar, cifrar e ler; a mesma versão exata que o `russh` fixa, para não entrar
+# uma segunda cópia. Apache-2.0 OR MIT.
+ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = ["std", "crypto", "encryption", "ppk", "rand_core"] }
+# FTPS: o TLS do cliente FTP, com o `ring` como o russh, as raízes do sistema e a leitura
+# do certificado para a pergunta da impressão. Apache-2.0 OR ISC OR MIT (rustls); os `x509-cert`
+# e `sha2` são Apache-2.0 OR MIT.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+# S3: `rusty-s3` assina as URLs (SigV4) e lê o XML, sem I/O (BSD-2-Clause); o `ureq` 3 faz o
+# HTTP síncrono (MIT OR Apache-2.0), sem os recursos padrão: o `rustls` padrão puxaria o
+# `webpki-roots` (CDLA-Permissive-2.0, fora do `deny.toml`). O TLS é o `rustls` com o `ring` e as
+# raízes do sistema, como no FTPS. `mime_guess` (MIT) escolhe o tipo do conteúdo.
+rusty-s3 = "0.10.2"
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "socks-proxy"] }
+mime_guess = "2"
+percent-encoding = "2"
+url = "2"
+# Apaga da memória as chaves e senhas (SSH, chave de API da IA).
+zeroize = "1.9"
+quick-xml = { version = "0.41", default-features = false }
+jiff = { version = "0.2", default-features = false, features = ["std"] }
+rcgen = "0.14"
+unicode-width = "0.2.2"
+skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
+# WebView: o controle do sistema (WebView2 no Windows, WKWebView no macOS, WebKitGTK no
+# Linux) como janela filha, pelo `wry`. No Linux, o GTK e o WebKitGTK diretamente para girar o
+# GTK, tirar a captura e saber das falhas de carregamento. O `open` abre os links de fora no
+# navegador do sistema.
+wry = { version = "0.57.0", default-features = false, features = ["os-webview", "x11"] }
+gtk = "0.18.2"
+webkit2gtk = "2.0.2"
+open = "5.3.2"
+# Ids estáveis dos widgets (M8): inserir ou remover um nó não muda o id dos outros. Zlib.
+slotmap = "1.1.1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.dev.package."*"]
+# Dependências otimizadas deixam o render CPU e os snapshots rápidos em dev.
+opt-level = 2

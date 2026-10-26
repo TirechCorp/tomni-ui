@@ -1,0 +1,21 @@
+# Os servidores do teste real da sonda de pasta (`crates/terminal/tests/pasta_real.rs`), nas portas
+# 22201 a 22203 do próprio computador. O `rodar.sh` sobe, roda o teste e derruba.
+name: tomni-pasta
+
+services:
+  openssh-novo:
+    build: { context: ., dockerfile: Dockerfile.alpine }
+    image: tomni-ui-pasta-alpine
+    container_name: pasta-openssh-novo
+    ports: ["127.0.0.1:22201:22"]
+  openssh-antigo:
+    build: { context: ., dockerfile: Dockerfile.debian }
+    image: tomni-ui-pasta-debian
+    container_name: pasta-openssh-antigo
+    ports: ["127.0.0.1:22202:22"]
+  dropbear:
+    image: tomni-ui-pasta-alpine
+    container_name: pasta-dropbear
+    command: ["dropbear"]
+    depends_on: [openssh-novo]
+    ports: ["127.0.0.1:22203:22"]

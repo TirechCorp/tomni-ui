@@ -1,0 +1,27 @@
+[package]
+name = "tomni-ui-cli"
+description = "CLI para agentes: screenshot, tree, lint, run e build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "tomni_ui_cli"
+
+[[bin]]
+name = "tomni-ui"
+path = "src/main.rs"
+# A doc do binário colidiria com a da lib `tomni_ui`.
+doc = false
+
+[dependencies]
+serde_json.workspace = true
+
+[dev-dependencies]
+# Confere que as regras e o protocolo daqui batem com os da lib.
+tomni-ui.workspace = true
+
+[lints]
+workspace = true

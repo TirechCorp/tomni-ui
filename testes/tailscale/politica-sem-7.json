@@ -1,0 +1,8 @@
+{
+  "acls": [
+    { "action": "accept", "src": ["*"], "dst": ["*:22"] }
+  ],
+  "autoApprovers": {
+    "routes": { "10.99.0.0/24": ["teste@"] }
+  }
+}

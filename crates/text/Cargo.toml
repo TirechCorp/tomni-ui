@@ -1,0 +1,24 @@
+[package]
+name = "tomni-ui-text"
+description = "Shaping e layout de texto com parley e Selawik"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# O código é MIT OR Apache-2.0; as fontes embutidas (fonts/) são OFL-1.1.
+license = "(MIT OR Apache-2.0) AND OFL-1.1"
+repository.workspace = true
+
+[features]
+# Embute a Noto Sans JP (cerca de 4,5 MB) para chinês, japonês e coreano. Fica fora do binário
+# padrão por causa do tamanho do APK.
+cjk = []
+# Embute a Cascadia Mono (quatro estilos, cerca de 2 MB) para o terminal.
+mono = ["dep:skrifa"]
+
+[dependencies]
+tomni-ui-render.workspace = true
+parley.workspace = true
+skrifa = { workspace = true, optional = true }
+
+[lints]
+workspace = true
