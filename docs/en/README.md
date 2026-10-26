@@ -231,7 +231,7 @@ ZeroTier) are optional and start the servers in Docker: see
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md) (the CI checks, the layout and the rules) and the
 [code of conduct](CODE_OF_CONDUCT.md). Security issues go through
-[`SECURITY.md`](SECURITY.md), not through a public issue.
+[`SECURITY.md`](SECURITY.md), not through a public issue. What is planned is in [`ROADMAP.md`](ROADMAP.md).
 
 ## License
 

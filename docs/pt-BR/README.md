@@ -231,7 +231,7 @@ ZeroTier) são opcionais e sobem os servidores no Docker: veja o
 
 Leia o [`CONTRIBUTING.md`](CONTRIBUTING.md) (a bateria do CI, a estrutura e as regras) e o
 [código de conduta](CODE_OF_CONDUCT.md). Falhas de segurança vão pelo caminho do
-[`SECURITY.md`](SECURITY.md), não por issue pública.
+[`SECURITY.md`](SECURITY.md), não por issue pública. O que está planejado fica em [`ROADMAP.md`](ROADMAP.md).
 
 ## Licença
 

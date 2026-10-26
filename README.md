@@ -21,6 +21,7 @@ remotos e VPNs que rodam sem administrador. → [Leia a documentação](docs/pt-
 | Contributing / Como contribuir | [CONTRIBUTING](docs/en/CONTRIBUTING.md) | [CONTRIBUTING](docs/pt-BR/CONTRIBUTING.md) |
 | Security / Segurança | [SECURITY](docs/en/SECURITY.md) | [SECURITY](docs/pt-BR/SECURITY.md) |
 | Changelog / Mudanças | [CHANGELOG](docs/en/CHANGELOG.md) | [CHANGELOG](docs/pt-BR/CHANGELOG.md) |
+| Roadmap / Planos | [ROADMAP](docs/en/ROADMAP.md) | [ROADMAP](docs/pt-BR/ROADMAP.md) |
 | Code of conduct / Código de conduta | [CODE_OF_CONDUCT](docs/en/CODE_OF_CONDUCT.md) | [CODE_OF_CONDUCT](docs/pt-BR/CODE_OF_CONDUCT.md) |
 
 Used by / Usado por: [Tirech Omni](https://github.com/TirechCorp/tirech-omni).
