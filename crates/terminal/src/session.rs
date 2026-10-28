@@ -155,6 +155,10 @@ pub(crate) struct SessionCore {
     log: Option<LogSink>,
     /// Quantos bytes chegaram pela conexão, somando as reaberturas.
     received: u64,
+    /// Quantos bytes foram para a conexão, somando as reaberturas.
+    sent: u64,
+    /// O tempo da interface com a sessão: ler, interpretar e pintar.
+    pub(crate) busy: Duration,
     /// Os [`OutputTap`]s vivos; os soltos saem da lista na próxima leitura.
     taps: Vec<Weak<RefCell<TapBuffer>>>,
 }
@@ -201,6 +205,8 @@ impl SessionCore {
             clipboard_out: Vec::new(),
             log: None,
             received: 0,
+            sent: 0,
+            busy: Duration::ZERO,
             taps: Vec::new(),
         }
     }
@@ -230,8 +236,9 @@ impl SessionCore {
         if self.closed || bytes.is_empty() {
             return;
         }
-        if let Err(error) = self.transport.write(bytes) {
-            self.close(Some(error.to_string()));
+        match self.transport.write(bytes) {
+            Ok(()) => self.sent += bytes.len() as u64,
+            Err(error) => self.close(Some(error.to_string())),
         }
     }
 
@@ -376,6 +383,9 @@ impl SessionCore {
             if budget.is_some_and(|budget| start.elapsed() >= budget) {
                 break;
             }
+        }
+        if read {
+            self.busy += start.elapsed();
         }
         read
     }
@@ -698,6 +708,26 @@ impl Session {
     /// que o app escreve com [`Session::feed`] não conta. Serve para saber se a saída parou.
     pub fn received(&self) -> u64 {
         self.with(|core| core.received).unwrap_or(0)
+    }
+
+    /// Quantos bytes foram para a conexão desde que a sessão abriu, somando as reaberturas: o
+    /// digitado, o colado e o [`Session::send`].
+    pub fn sent(&self) -> u64 {
+        self.with(|core| core.sent).unwrap_or(0)
+    }
+
+    /// Quanto tempo a interface gastou com a sessão desde que ela abriu: ler o que chegou,
+    /// interpretar e pintar a tela. Com o [`Session::threads`], dá a CPU de cada aba.
+    pub fn busy(&self) -> Duration {
+        self.with(|core| core.busy).unwrap_or(Duration::ZERO)
+    }
+
+    /// Os ids, no sistema, das threads que a conexão usa agora (`/proc/self/task/<id>` no
+    /// Linux), para o app medir a CPU delas. Vazio nos outros sistemas, nas conexões sem
+    /// thread e depois de a sessão acabar.
+    pub fn threads(&self) -> Vec<u32> {
+        self.with(|core| core.transport.threads())
+            .unwrap_or_default()
     }
 
     /// Passa a guardar o texto que chega pela conexão, limpo como no log de texto (sem as
@@ -1412,6 +1442,22 @@ mod tests {
         s.feed(b"aviso");
         assert_eq!(s.received(), 3);
         s.dispose();
+    }
+
+    #[test]
+    fn enviados_e_tempo_de_interface_somam() {
+        let lb = Loopback::new().echo();
+        let s = Session::new(lb);
+        assert_eq!((s.sent(), s.busy()), (0, Duration::ZERO));
+        s.send(b"abc");
+        s.paste("de");
+        assert_eq!(s.sent(), 5);
+        Session::poll_all();
+        assert!(s.busy() > Duration::ZERO);
+        // O Loopback não tem thread.
+        assert!(s.threads().is_empty());
+        s.dispose();
+        assert_eq!((s.sent(), s.busy()), (0, Duration::ZERO));
     }
 
     #[test]

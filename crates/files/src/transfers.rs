@@ -1538,7 +1538,20 @@ impl Shared {
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) => return Err(error),
             };
-            upload.write_all(&buffer[..read])?;
+            // Um buffer inteiro pode levar muito num servidor lento: o cancelar vale entre as
+            // escritas parciais, sem esperar o buffer acabar.
+            let mut written = 0;
+            while written < read {
+                if self.stopped(job) {
+                    return Ok(Outcome::Cancelled);
+                }
+                match upload.write(&buffer[written..read]) {
+                    Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                    Ok(n) => written += n,
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                    Err(error) => return Err(error),
+                }
+            }
             done += read as u64;
             let now = self.clock.now();
             let elapsed = now.saturating_sub(last);

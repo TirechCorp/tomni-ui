@@ -370,6 +370,13 @@ impl OpenVpn {
         }
     }
 
+    /// Pede para parar sem esperar e sem largar o motor: serve quando há outros donos do
+    /// `Arc` (as conexões abertas por ele) e o motor não pode mais ficar ligado. Avisa o
+    /// servidor como o [`OpenVpn::stop`]; depois disso, o estado vai a `Stopped`.
+    pub fn close(&self) {
+        let _ = self.commands.send(Command::Stop);
+    }
+
     /// Avisa o servidor (`explicit-exit-notify`) e para; espera no máximo `wait`.
     pub fn stop(self, wait: Duration) {
         let _ = self.commands.send(Command::Stop);

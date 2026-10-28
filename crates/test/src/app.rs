@@ -223,6 +223,16 @@ pub struct TestApp {
     exited: bool,
 }
 
+/// Passa o título do `Form` da tela à janela depois do frame, como o runner faz: um título que
+/// muda (uma closure) aparece em [`WindowHandle::title`].
+fn sync_title(handle: WindowHandle, ui: &Ui) {
+    if let Some(title) = ui.title()
+        && title != handle.title()
+    {
+        windows::set_title(handle, &title);
+    }
+}
+
 /// O que se guarda de uma janela que não é a atual.
 #[derive(Debug)]
 struct Slot {
@@ -493,6 +503,7 @@ impl TestApp {
         pump_terminals(&mut self.ui);
         pump_webviews(&mut self.ui);
         self.ui.frame();
+        sync_title(self.current, &self.ui);
         // As outras janelas também rodam o frame, cada uma como a janela atual.
         for slot in &mut self.others {
             windows::set_current(slot.handle);
@@ -506,6 +517,7 @@ impl TestApp {
             pump_terminals(&mut slot.ui);
             pump_webviews(&mut slot.ui);
             slot.ui.frame();
+            sync_title(slot.handle, &slot.ui);
         }
         windows::set_current(self.current);
         if close {
@@ -987,7 +999,8 @@ impl TestApp {
     }
 
     /// Valor do `Slider` ou do `NumberBox` `id`, o andamento da `ProgressBar`/`ProgressRing`
-    /// `id`, de 0 a 1, ou o tamanho do primeiro painel do `Split` `id` (ou do divisor dele), em
+    /// `id`, de 0 a 1, o nível do `LevelMeter`, o ponto mais novo do `AreaChart`/`Sparkline`, ou
+    /// o tamanho do primeiro painel do `Split` `id` (ou do divisor dele), em
     /// pixels.
     ///
     /// # Panics
@@ -1015,8 +1028,14 @@ impl TestApp {
             Look::ProgressBar(visual) | Look::ProgressRing(visual) => visual
                 .value
                 .unwrap_or_else(|| panic!("{id:?} está no modo indeterminado")),
+            Look::LevelMeter(visual) => visual.value,
+            Look::Chart(visual) => visual
+                .values
+                .last()
+                .copied()
+                .unwrap_or_else(|| panic!("{id:?} ainda não tem nenhum ponto")),
             look => panic!(
-                "{id:?} não é um Slider, um NumberBox, uma ProgressBar, um ProgressRing nem um Split: {look:?}"
+                "{id:?} não é um Slider, um NumberBox, uma ProgressBar, um ProgressRing, um gráfico, um LevelMeter nem um Split: {look:?}"
             ),
         }
     }

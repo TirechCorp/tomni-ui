@@ -59,6 +59,7 @@ mod launcher;
 mod placement;
 mod render_guard;
 mod runner;
+mod stall;
 #[cfg(not(target_os = "android"))]
 mod tray;
 
@@ -323,6 +324,11 @@ pub struct WindowOptions {
     /// degrau por vez, e o degrau que funcionou fica gravado nele. `None` desliga a guarda.
     /// Apagar o arquivo volta ao desenho normal.
     pub render_guard: Option<std::path::PathBuf>,
+    /// Arquivo do registro de travamentos: uma thread vigia escreve nele quando a interface
+    /// fica parada mais de 2 s numa etapa (qual, com o estado da thread, a carga e a memória)
+    /// e, a cada minuto em que a interface pesou, o tempo por etapa. `None` (o padrão) desliga
+    /// a vigia e a marcação das etapas.
+    pub stall_log: Option<std::path::PathBuf>,
     #[cfg(target_os = "android")]
     android_app: Option<AndroidApp>,
 }
@@ -339,6 +345,7 @@ impl WindowOptions {
             icon: None,
             app_id: None,
             render_guard: None,
+            stall_log: None,
             #[cfg(target_os = "android")]
             android_app: None,
         }

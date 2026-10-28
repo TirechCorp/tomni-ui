@@ -18,6 +18,7 @@
 mod auto_suggest_box;
 mod border;
 mod button;
+mod chart;
 mod checkbox;
 pub mod clipboard;
 mod color;
@@ -56,6 +57,7 @@ mod settings_expander;
 mod shortcut;
 mod slider;
 mod split;
+pub mod stages;
 mod strings;
 mod symbol;
 mod tab_view;
@@ -79,6 +81,10 @@ pub use border::{
 pub use button::{
     BUTTON_ICON_SIZE, BUTTON_ICON_SPACING, Button, ButtonState, ButtonVariant, ButtonVisual,
     ICON_BUTTON_SIZE, ICON_BUTTON_SIZE_COMPACT,
+};
+pub use chart::{
+    AreaChart, CHART_CAPACITY, ChartKind, ChartVisual, LEVEL_METER_SEGMENTS, LevelMeter,
+    LevelMeterVisual, Sparkline,
 };
 pub use checkbox::{CheckBox, CheckBoxVisual};
 pub use color::{Brush, Color, GradientStop, LinearGradient, ThemeColor, Token};

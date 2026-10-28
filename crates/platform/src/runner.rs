@@ -5,11 +5,13 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "android")]
 use tomni_ui_core::Insets;
 use tomni_ui_core::kurbo::{Point, Vec2};
+use tomni_ui_core::stages;
 use tomni_ui_core::windows::{self, OpenWindow, WindowGeometry, WindowHandle};
 use tomni_ui_core::{
     Cursor, Ime, InputPurpose, Modifiers, PointerKind, ResizeEdge, TextInput, WindowChrome,
@@ -73,11 +75,20 @@ pub fn run_windows<H: Handler>(
     let event_loop = builder.build().map_err(Error::EventLoop)?;
     // Uma thread que lê dados (o transporte do `Terminal`) acorda o loop com um evento vazio:
     // o `user_event` marca as janelas e o `about_to_wait` que vem depois roda o frame delas.
+    // Um evento por vez na fila: uma saída pesada chama o `wake` a cada pedaço lido, e o
+    // winit esvazia a fila inteira antes de responder ao sistema e de rodar o frame.
     let proxy = event_loop.create_proxy();
+    let queued = Arc::new(AtomicBool::new(false));
+    let waker_queued = Arc::clone(&queued);
     tomni_ui_core::set_waker(move || {
-        let _ = proxy.send_event(());
+        if !waker_queued.swap(true, Ordering::AcqRel) {
+            let _ = proxy.send_event(());
+        }
     });
-    let mut runner = Runner::new(options, handler, factory);
+    if let Some(log) = options.stall_log.clone() {
+        crate::stall::start(log);
+    }
+    let mut runner = Runner::new(options, handler, factory, queued);
     let result = event_loop.run_app(&mut runner).map_err(Error::EventLoop);
     // Um pânico não passa daqui: a marca da abertura fica e a próxima sobe o degrau.
     if let Some(guard) = &mut runner.guard {
@@ -123,6 +134,8 @@ struct Runner<H, F> {
     windows: Vec<Janela<H>>,
     foreign: Option<Foreign>,
     error: Option<Error>,
+    /// Há um evento do [`tomni_ui_core::wake`] na fila do loop: os outros esperam ele sair.
+    wake_queued: Arc<AtomicBool>,
 }
 
 /// Uma janela do sistema com o seu `Handler`.
@@ -175,7 +188,7 @@ struct Janela<H> {
 }
 
 impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> Runner<H, F> {
-    fn new(options: WindowOptions, handler: H, factory: F) -> Self {
+    fn new(options: WindowOptions, handler: H, factory: F, wake_queued: Arc<AtomicBool>) -> Self {
         let guard = options.render_guard.clone().map(RenderGuard::open);
         let mode = guard.as_ref().map_or(Mode::default(), RenderGuard::mode);
         Self {
@@ -191,6 +204,7 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> Runner<H, F> {
             windows: Vec::new(),
             foreign: None,
             error: None,
+            wake_queued,
         }
     }
 
@@ -644,10 +658,9 @@ impl<H: Handler> Janela<H> {
             } else {
                 None
             };
-            eprintln!(
-                "{}",
-                episode.line(&format!("{:?}", self.handle), deadline.as_deref())
-            );
+            let line = episode.line(&format!("{:?}", self.handle), deadline.as_deref());
+            crate::stall::note(&line);
+            eprintln!("{line}");
         }
     }
 
@@ -861,8 +874,15 @@ impl<H: Handler> Janela<H> {
     fn redraw(&mut self, gpu: &mut Gpu) -> Result<bool, Error> {
         windows::set_current(self.handle);
         self.sync_safe_area();
-        self.handler.frame();
-        let Some(texture) = self.acquire(gpu) else {
+        {
+            let _quadro = stages::stage("quadro");
+            self.handler.frame();
+        }
+        let texture = {
+            let _textura = stages::stage("textura");
+            self.acquire(gpu)
+        };
+        let Some(texture) = texture else {
             return Ok(false);
         };
         let Some(surface) = &mut self.surface else {
@@ -870,6 +890,7 @@ impl<H: Handler> Janela<H> {
         };
         let (width, height) = (surface.config.width, surface.config.height);
         let device = &gpu.context.devices[surface.dev_id];
+        let pintura = stages::stage("pintura");
         let source = if let Some(cpu) = &mut self.cpu {
             cpu.render(&self.handler, device, (width, height), self.scale)
         } else {
@@ -890,6 +911,8 @@ impl<H: Handler> Janela<H> {
                 .map_err(Error::Render)?;
             &surface.target_view
         };
+        drop(pintura);
+        let _apresentacao = stages::stage("apresentação");
         let view = texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -1066,6 +1089,11 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
         let Some(i) = self.index(id) else {
             return;
         };
+        let _etapa = stages::stage(if matches!(event, WindowEvent::RedrawRequested) {
+            "desenho"
+        } else {
+            "evento"
+        });
         let now = Instant::now();
         let handle = self.windows[i].handle;
         windows::set_current(handle);
@@ -1299,12 +1327,16 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
     /// depois roda o frame delas. Sem isso, o que uma thread mudou só aparecia no próximo evento
     /// de entrada, quando nada animava.
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, (): ()) {
+        let _acordar = stages::stage("acordar");
+        // Antes de marcar: o `wake` que vier daqui em diante põe outro evento na fila.
+        self.wake_queued.store(false, Ordering::Release);
         for janela in &mut self.windows {
             janela.woken = true;
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let _ciclo = stages::stage("ciclo");
         // O motor dos controles nativos (o GTK do `WebView`) gira no mesmo loop, antes do
         // frame: o que ele avisou entra neste.
         let pump = tomni_ui_core::native::pump();
@@ -1325,7 +1357,11 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
                 janela.request_redraw(held);
             }
             let mut reason = std::mem::take(&mut janela.woken).then_some(Reason::Event);
-            if janela.tick(now) {
+            let due = {
+                let _prazos = stages::stage("prazos");
+                janela.tick(now)
+            };
+            if due {
                 reason = Some(Reason::Deadline);
                 janela
                     .trace
@@ -1343,7 +1379,10 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
                 reason = Some(Reason::Blink);
             }
             if let Some(reason) = reason
-                && janela.handler.frame()
+                && {
+                    let _quadro = stages::stage("quadro");
+                    janela.handler.frame()
+                }
             {
                 janela.request_redraw(reason);
             }

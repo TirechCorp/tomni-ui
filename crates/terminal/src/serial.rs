@@ -178,11 +178,17 @@ impl Serial {
         let (read_inbox, read_stop) = (serial.inbox.clone(), Arc::clone(&serial.stop));
         thread::Builder::new()
             .name("tomni-ui-serial-leitura".into())
-            .spawn(move || read_loop(&reader, &read_inbox, &read_stop))?;
+            .spawn(move || {
+                let _mark = read_inbox.mark_thread();
+                read_loop(&reader, &read_inbox, &read_stop);
+            })?;
         let (write_inbox, write_stop) = (serial.inbox.clone(), Arc::clone(&serial.stop));
         thread::Builder::new()
             .name("tomni-ui-serial-escrita".into())
-            .spawn(move || write_loop(&writer, &commands, &write_inbox, &write_stop))?;
+            .spawn(move || {
+                let _mark = write_inbox.mark_thread();
+                write_loop(&writer, &commands, &write_inbox, &write_stop);
+            })?;
         Ok(())
     }
 }
@@ -190,6 +196,8 @@ impl Serial {
 impl Drop for Serial {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        // A thread de leitura parada esperando vaga na fila segue e vê o `stop`.
+        self.inbox.detach();
         let _ = self.commands.send(Command::Close);
     }
 }
@@ -207,6 +215,10 @@ impl Transport for Serial {
 
     fn pending(&self) -> bool {
         self.inbox.pending()
+    }
+
+    fn threads(&self) -> Vec<u32> {
+        self.inbox.threads()
     }
 
     fn reopen(&mut self) -> bool {
@@ -242,7 +254,7 @@ fn read_loop(port: &SerialPort, inbox: &Inbox, stop: &AtomicBool) {
     while !stop.load(Ordering::Acquire) {
         match port.read(&mut buf) {
             Ok(0) => return inbox.close(None),
-            Ok(n) => inbox.push(&buf[..n]),
+            Ok(n) => inbox.push_wait(&buf[..n]),
             Err(error) if waiting(&error) => {}
             Err(error) => return inbox.close(Some(error_message(&error))),
         }

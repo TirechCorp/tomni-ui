@@ -3274,6 +3274,13 @@ mod tests {
     fn put(tree: &mut Tree, name: &str, rect: Rect) {
         let id = tree.find(name).unwrap();
         tree.set_rect(id, rect);
+        if tree.widget(id).kind() == "menu_flyout" {
+            // A rolagem e a coluna que o menu monta em volta dos itens ocupam o menu todo.
+            let rolagem = tree.children(id)[0];
+            let coluna = tree.children(rolagem)[0];
+            tree.set_rect(rolagem, rect);
+            tree.set_rect(coluna, rect);
+        }
     }
 
     /// Roda os efeitos e acompanha as camadas, como o loop de frame.

@@ -12,11 +12,13 @@ use kurbo::{Size, Vec2};
 use tomni_ui_reactive::{Get, GetUntracked, Set, Signal, Update, signal, untrack};
 
 use crate::button::ButtonState;
+use crate::containers::Column;
 use crate::cx::EventCx;
 use crate::density::Density;
 use crate::event::{Event, Key};
 use crate::press::Pressable;
 use crate::prop::{IntoProp, Prop};
+use crate::scroll_viewer::ScrollViewer;
 use crate::shortcut::{Accelerator, Shortcut};
 use crate::symbol::Symbol;
 use crate::widget::{
@@ -648,7 +650,7 @@ impl Widget for MenuFlyout {
         let depth = self.chain.len();
         let menu_open = self.open;
         let mut keys: Vec<AccessKey> = Vec::new();
-        let children = entries
+        let children: Vec<Box<dyn Widget>> = entries
             .into_iter()
             .map(|entry| -> Box<dyn Widget> {
                 let spec = match entry {
@@ -752,7 +754,9 @@ impl Widget for MenuFlyout {
             })
             .collect();
         self.keys = keys;
-        children
+        // Como o `MenuFlyoutPresenter`: o menu mais alto que a janela rola.
+        let list = children.into_iter().fold(Column::new(), Column::boxed);
+        vec![Box::new(ScrollViewer::new().child(list).generated())]
     }
 
     fn layer(&self) -> Option<Layer> {

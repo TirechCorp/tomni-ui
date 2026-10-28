@@ -10,7 +10,10 @@
 //!   ícone tem uma thread, que fala com o D-Bus sem travar a interface. Com
 //!   `assume_sni_available`, a falta do `StatusNotifierWatcher` não derruba o ícone: o `ksni`
 //!   avisa (`watcher_offline`), a interface vê [`tomni_ui_core::tray::available`] cair e o
-//!   ícone aparece quando o watcher volta (`watcher_online`).
+//!   ícone aparece quando o watcher volta (`watcher_online`). O desenho vai nos pixels
+//!   (`IconPixmap`) e também num PNG em `$XDG_RUNTIME_DIR/tomni-ui/`, cujo caminho vai no
+//!   `IconName`: o `indicator-application` do Ayatana (o da bandeja do Cinnamon e do MATE)
+//!   ignora os pixels e mostraria um espaço vazio. É o que o Qt faz.
 //!
 //! Nos outros sistemas (o Android) não há bandeja: nada é instalado e `available()` fica
 //! `false`.
@@ -230,6 +233,8 @@ mod desktop {
 mod linux {
     use std::cell::RefCell;
     use std::collections::HashMap;
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    use std::path::{Path, PathBuf};
     use std::rc::Rc;
     use std::sync::mpsc;
     use std::thread;
@@ -249,6 +254,8 @@ mod linux {
     #[derive(Clone)]
     struct View {
         pixmap: Option<ksni::Icon>,
+        /// O caminho do PNG do ícone, para o `IconName`; vazio se não deu para gravar.
+        file: String,
         state: TrayState,
         activatable: bool,
     }
@@ -279,6 +286,10 @@ mod linux {
                 title: self.view.state.tooltip.clone(),
                 ..ksni::ToolTip::default()
             }
+        }
+
+        fn icon_name(&self) -> String {
+            self.view.file.clone()
         }
 
         fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -341,6 +352,41 @@ mod linux {
         })
     }
 
+    /// A pasta dos PNGs dos ícones: `$XDG_RUNTIME_DIR/tomni-ui`, ou a temporária sem ele.
+    fn icon_dir() -> PathBuf {
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .filter(|v| !v.is_empty())
+            .map_or_else(std::env::temp_dir, PathBuf::from)
+            .join("tomni-ui")
+    }
+
+    /// Grava o ícone `id` como PNG em `dir` e devolve o caminho. O nome leva o pid e um resumo
+    /// do desenho: um desenho novo é um arquivo novo, e quem mostra a bandeja não fica com o
+    /// antigo em cache. Grava num `.tmp` e renomeia, para ninguém ler o arquivo pela metade.
+    fn write_icon(dir: &Path, name: &str, id: u64, image: &TrayImage) -> Option<PathBuf> {
+        let (data, width, height) = super::rgba(image)?;
+        let mut hasher = DefaultHasher::new();
+        image.png().hash(&mut hasher);
+        let path = dir.join(format!(
+            "{name}-tray-{}-{id}-{:016x}.png",
+            std::process::id(),
+            hasher.finish()
+        ));
+        if path.is_file() {
+            return Some(path);
+        }
+        std::fs::create_dir_all(dir).ok()?;
+        let mut png = Vec::new();
+        let mut encoder = png::Encoder::new(&mut png, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().ok()?.write_image_data(&data).ok()?;
+        let temporary = path.with_extension("png.tmp");
+        std::fs::write(&temporary, png).ok()?;
+        std::fs::rename(&temporary, &path).ok()?;
+        Some(path)
+    }
+
     /// O nome do app para o D-Bus: o do executável.
     fn app_name() -> String {
         std::env::current_exe()
@@ -352,6 +398,8 @@ mod linux {
 
     struct Linux {
         workers: RefCell<HashMap<u64, mpsc::Sender<Message>>>,
+        /// O PNG atual de cada ícone, apagado quando o desenho muda ou o ícone sai.
+        files: RefCell<HashMap<u64, PathBuf>>,
         sender: TraySender,
         name: String,
     }
@@ -393,6 +441,7 @@ mod linux {
         tomni_ui_core::tray::set_backend(
             Rc::new(Linux {
                 workers: RefCell::new(HashMap::new()),
+                files: RefCell::new(HashMap::new()),
                 sender,
                 name: app_name(),
             }),
@@ -432,8 +481,19 @@ mod linux {
 
     impl TrayBackend for Linux {
         fn show(&self, id: u64, image: &TrayImage, state: &TrayState, activatable: bool) {
+            let file = write_icon(&icon_dir(), &self.name, id, image);
+            let old = match &file {
+                Some(file) => self.files.borrow_mut().insert(id, file.clone()),
+                None => self.files.borrow_mut().remove(&id),
+            };
+            if let Some(old) = old.filter(|old| Some(old) != file.as_ref()) {
+                let _ = std::fs::remove_file(old);
+            }
             let view = View {
                 pixmap: pixmap(image),
+                file: file
+                    .map(|f| f.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
                 state: state.clone(),
                 activatable,
             };
@@ -453,6 +513,58 @@ mod linux {
             if let Some(worker) = self.workers.borrow_mut().remove(&id) {
                 let _ = worker.send(Message::Remove);
             }
+            if let Some(file) = self.files.borrow_mut().remove(&id) {
+                let _ = std::fs::remove_file(file);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        const SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#ff0000"/></svg>"##;
+        const OUTRO: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#00ff00"/></svg>"##;
+
+        fn pasta(nome: &str) -> PathBuf {
+            let dir = std::env::temp_dir()
+                .join(format!("tomni-ui-bandeja-{nome}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            dir
+        }
+
+        #[test]
+        fn o_icone_vira_um_png_que_o_ayatana_le_pelo_caminho() {
+            let dir = pasta("png");
+            let path = write_icon(&dir, "app", 7, &TrayImage::from_svg(SVG)).unwrap();
+            assert!(path.is_absolute());
+            assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+            let decoder = png::Decoder::new(std::io::Cursor::new(std::fs::read(&path).unwrap()));
+            let info = decoder.read_info().unwrap().info().clone();
+            assert_eq!((info.width, info.height), (64, 64));
+            // Nenhum `.tmp` fica para trás.
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn desenho_novo_e_arquivo_novo_e_o_mesmo_desenho_reusa_o_arquivo() {
+            let dir = pasta("nomes");
+            let a = write_icon(&dir, "app", 1, &TrayImage::from_svg(SVG)).unwrap();
+            let de_novo = write_icon(&dir, "app", 1, &TrayImage::from_svg(SVG)).unwrap();
+            let b = write_icon(&dir, "app", 1, &TrayImage::from_svg(OUTRO)).unwrap();
+            let outro_icone = write_icon(&dir, "app", 2, &TrayImage::from_svg(SVG)).unwrap();
+            assert_eq!(a, de_novo);
+            assert_ne!(a, b);
+            assert_ne!(a, outro_icone);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn o_que_nao_e_imagem_nao_grava_nada() {
+            let dir = pasta("nada");
+            assert!(write_icon(&dir, "app", 1, &TrayImage::from_png(b"nada")).is_none());
+            assert!(!dir.exists());
         }
     }
 }

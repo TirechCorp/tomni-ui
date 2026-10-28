@@ -35,6 +35,9 @@ pub enum CellValue {
     /// Andamento de 0 a 1: a célula mostra uma `ProgressBar` no lugar do texto (o texto é só
     /// o nome acessível). Ordena como um número.
     Progress(f64),
+    /// Uma série de 0 a 1, do mais antigo ao mais novo: a célula mostra uma minissérie (o
+    /// `Sparkline`) no lugar do texto, que fica só como nome acessível. Ordena pela média.
+    Sparkline(Vec<f64>),
 }
 
 /// Uma coluna.
@@ -133,6 +136,8 @@ pub struct DataGridRow {
     pub drop_target: bool,
     /// O tom do fundo, se o app quer destacar a linha (padrão: nenhum).
     pub tone: Option<RowTone>,
+    /// O calor de cada célula, de 0 a 1, na ordem das células (as que faltam não têm calor).
+    pub heat: Vec<f64>,
 }
 
 impl DataGridRow {
@@ -145,6 +150,7 @@ impl DataGridRow {
             rank: 0,
             drop_target: false,
             tone: None,
+            heat: Vec::new(),
         }
     }
 
@@ -177,6 +183,37 @@ impl DataGridRow {
     pub fn tone(mut self, tone: RowTone) -> Self {
         self.tone = Some(tone);
         self
+    }
+
+    /// O calor da última célula, de 0 a 1: o fundo dela vai do amarelo-claro ao
+    /// laranja-avermelhado, como as colunas de CPU e memória do Gerenciador de Tarefas. A
+    /// seleção e o hover aparecem por cima.
+    ///
+    /// ```
+    /// use tomni_ui_core::{CellValue, DataGridRow};
+    ///
+    /// let linha = DataGridRow::new("web")
+    ///     .cell("web", CellValue::Text("web".into()))
+    ///     .cell("42 %", CellValue::Number(42.0))
+    ///     .heat(0.42);
+    /// assert_eq!(linha.cell_heat(1), 0.42);
+    /// assert_eq!(linha.cell_heat(0), 0.0);
+    /// ```
+    pub fn heat(mut self, heat: f64) -> Self {
+        if let Some(last) = self.cells.len().checked_sub(1) {
+            self.heat.resize(self.cells.len(), 0.0);
+            self.heat[last] = if heat.is_nan() {
+                0.0
+            } else {
+                heat.clamp(0.0, 1.0)
+            };
+        }
+        self
+    }
+
+    /// O calor da célula `index` (0 se não tem).
+    pub fn cell_heat(&self, index: usize) -> f64 {
+        self.heat.get(index).copied().unwrap_or(0.0)
     }
 
     /// O texto da primeira célula, que dá o nome da linha.
@@ -251,6 +288,11 @@ impl SortKey {
             Some((_, CellValue::Text(text))) => Self::Text(fold(text)),
             Some((_, CellValue::Number(n) | CellValue::Progress(n))) => Self::Number(*n),
             Some((_, CellValue::Time(time))) => Self::Time(*time),
+            Some((_, CellValue::Sparkline(values))) => {
+                let values: Vec<f64> = values.iter().copied().filter(|v| !v.is_nan()).collect();
+                let count = values.len().max(1) as f64;
+                Self::Number(values.iter().sum::<f64>() / count)
+            }
             None => Self::Text(String::new()),
         }
     }
@@ -472,6 +514,29 @@ mod tests {
         ];
         let flat = arrange(&linhas, "", Some((0, SortDirection::Ascending)));
         assert_eq!(chaves(&flat), ["b", "a"]);
+    }
+
+    #[test]
+    fn a_minisserie_ordena_pela_media() {
+        let linhas = vec![
+            DataGridRow::new("pico").cell("", CellValue::Sparkline(vec![0.0, 0.0, 0.9])),
+            DataGridRow::new("constante").cell("", CellValue::Sparkline(vec![0.4, 0.4, 0.4])),
+            DataGridRow::new("vazia").cell("", CellValue::Sparkline(Vec::new())),
+        ];
+        let flat = arrange(&linhas, "", Some((0, SortDirection::Descending)));
+        assert_eq!(chaves(&flat), ["constante", "pico", "vazia"]);
+    }
+
+    #[test]
+    fn o_calor_fica_na_ultima_celula_e_entre_0_e_1() {
+        let linha = DataGridRow::new("a")
+            .cell("a", CellValue::Text("a".into()))
+            .cell("1", CellValue::Number(1.0))
+            .cell("2", CellValue::Number(2.0))
+            .heat(7.0);
+        assert_eq!(linha.heat, [0.0, 0.0, 1.0]);
+        // Sem célula, não há onde pôr o calor.
+        assert!(DataGridRow::new("b").heat(0.5).heat.is_empty());
     }
 
     #[test]

@@ -59,6 +59,8 @@ struct Modo {
     /// Quantas recusas de autenticação o servidor tolera antes de derrubar a conexão (o
     /// `MaxAuthTries` do OpenSSH); 0 deixa o padrão do `russh`.
     max_tentativas: Arc<AtomicUsize>,
+    /// O shell despeja saída sem fim (o "despeja" digitado) até chegar um Ctrl+C.
+    despejando: Arc<AtomicBool>,
 }
 
 impl Modo {
@@ -239,7 +241,22 @@ impl server::Handler for Servidor {
         if !self.shells.contains(&channel) {
             return Ok(());
         }
-        if data == b"exit 3\r" {
+        if data == b"despeja\r" {
+            self.modo.despejando.store(true, Ordering::SeqCst);
+            let (despejando, handle) = (Arc::clone(&self.modo.despejando), session.handle());
+            tokio::spawn(async move {
+                let pedaco = b"linha de teste com bastante texto\r\n".repeat(1000);
+                while despejando.load(Ordering::SeqCst) {
+                    if handle.data(channel, pedaco.clone()).await.is_err() {
+                        return;
+                    }
+                }
+                let _ = handle.data(channel, b"fim-despejo".to_vec()).await;
+            });
+        } else if data == b"\x03" {
+            self.registrar("ctrl-c".into());
+            self.modo.despejando.store(false, Ordering::SeqCst);
+        } else if data == b"exit 3\r" {
             session.exit_status_request(channel, 3)?;
             session.close(channel)?;
         } else if data == b"x11\r" || data == b"x11 errado\r" {
@@ -620,6 +637,7 @@ impl Teste {
             exec_imediato: Arc::default(),
             sem_compressao: Arc::default(),
             max_tentativas: Arc::default(),
+            despejando: Arc::default(),
         };
         let chave = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
         let servidor = chave.public_key().clone();
@@ -756,10 +774,71 @@ fn senha_shell_eco_e_tamanho() {
     assert!(texto.ends_with("olá"), "{texto:?}");
     ssh.resize(120, 40);
     esperar(|| teste.log().contains(&"janela 120x40".to_owned()));
+    // A conexão roda numa thread só, a que o app mede.
+    let threads = ssh.threads();
+    assert_eq!(
+        threads.len(),
+        usize::from(cfg!(target_os = "linux")),
+        "{threads:?}"
+    );
     let log = teste.log();
     assert_eq!(log[0], "pty xterm-256color 100x30", "{log:?}");
     assert_eq!(log[1], "shell");
     assert!(log.contains(&"janela 120x40".to_owned()), "{log:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn saida_sem_fim_nao_passa_do_limite_da_fila_e_o_ctrl_c_chega() {
+    let teste = Teste::novo("despejo");
+    teste.conhecer_servidor();
+    let mut ssh = teste.builder().password("senha").connect();
+    ler_ate(&mut ssh, "bem-vinda");
+    ssh.write(b"despeja\r").unwrap();
+    esperar(|| ssh.inbox.queued() >= crate::INBOX_LIMIT);
+    thread::sleep(Duration::from_millis(300));
+    let fila = ssh.inbox.queued();
+    assert!(
+        fila >= crate::INBOX_LIMIT,
+        "o servidor enche a fila: {fila}"
+    );
+    // A folga depois da tecla (`KEY_SLACK`) passa do limite em 1 MiB, no máximo.
+    assert!(
+        fila < 2 * crate::INBOX_LIMIT + 64 * 1024,
+        "e para no limite: {fila}"
+    );
+    // Um canal novo na mesma conexão (o SFTP, um comando) abre com a fila cheia.
+    let canais = ssh.ssh_channels().unwrap();
+    let comando = thread::spawn(move || {
+        canais.exec(
+            "echo canal-extra",
+            &mut std::io::empty(),
+            &mut |_| {},
+            Duration::from_secs(20),
+        )
+    });
+    thread::sleep(Duration::from_millis(300));
+    // Sem ninguém ler, as teclas ainda vão.
+    ssh.write(b"\x03").unwrap();
+    esperar(|| teste.log().contains(&"ctrl-c".to_owned()));
+    assert!(
+        teste.log().contains(&"ctrl-c".to_owned()),
+        "{:?}",
+        teste.log()
+    );
+    let limite = Instant::now() + Duration::from_secs(20);
+    let mut lido = Vec::new();
+    loop {
+        lido.drain(..lido.len().saturating_sub(16));
+        assert_eq!(ssh.read(&mut lido, usize::MAX), Status::Open);
+        if lido.windows(11).any(|w| w == b"fim-despejo") {
+            break;
+        }
+        assert!(Instant::now() < limite, "o despejo não terminou");
+        thread::sleep(Duration::from_millis(1));
+    }
+    let saida = comando.join().unwrap().unwrap();
+    assert_eq!(saida.stdout_text(), "canal-extra\n");
 }
 
 #[test]

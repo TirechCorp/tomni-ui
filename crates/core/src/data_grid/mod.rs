@@ -86,8 +86,9 @@ const AUTO_SCROLL: f64 = 600.0;
 /// Enter chamam `on_invoke`. As setas, Home, End, PageUp, PageDown e as letras navegam (com
 /// Shift marcam a faixa), Ctrl+A seleciona tudo, F2 renomeia e Delete chama `on_delete`.
 /// Arrastar uma linha leva a seleção; `on_drop` recebe o que caiu neste grid. As células são
-/// de texto, ícone (na primeira coluna) e barra de andamento ([`CellValue::Progress`]); não há
-/// célula com widget.
+/// de texto, ícone (na primeira coluna), barra de andamento ([`CellValue::Progress`]) e
+/// minissérie ([`CellValue::Sparkline`]), e cada uma pode ter um fundo de calor
+/// ([`DataGridRow::heat`]); não há célula com widget.
 pub struct DataGrid {
     common: Common,
     shared: Rc<Shared>,

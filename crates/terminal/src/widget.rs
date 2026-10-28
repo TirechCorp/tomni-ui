@@ -1990,6 +1990,7 @@ impl Widget for Terminal {
     }
 
     fn tick(&mut self, dt: Duration) {
+        let _terminal = tomni_ui_core::stages::stage("terminal");
         self.flash = self
             .flash
             .and_then(|left| left.checked_sub(dt))
@@ -2128,6 +2129,16 @@ impl TerminalVisual {
     /// Se o terminal estiver lendo da conexão (não acontece durante a pintura).
     pub fn emulator(&self) -> Ref<'_, Emulator> {
         Ref::map(self.core.borrow(), |core| &core.emulator)
+    }
+
+    /// Soma `elapsed` ao tempo de interface da sessão ([`crate::Session::busy`]): o `Drawer`
+    /// chama depois de pintar o terminal.
+    ///
+    /// # Panics
+    ///
+    /// Se o emulador ainda estiver emprestado ([`TerminalVisual::emulator`]).
+    pub fn add_busy(&self, elapsed: Duration) {
+        self.core.borrow_mut().busy += elapsed;
     }
 
     /// Medidas da célula.

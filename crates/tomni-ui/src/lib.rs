@@ -94,17 +94,17 @@ pub mod image {
 /// `use tomni_ui::prelude::*` traz signals, widgets e o necessário para montar uma view.
 pub mod prelude {
     pub use tomni_ui_core::{
-        Align, AutoSuggestBox, Border, Brush, Button, Card, CellValue, CheckBox, Color, Column,
-        ColumnWidth, ComboBox, ContentDialog, DataGrid, DataGridColumn, DataGridDrop, DataGridRow,
-        Density, DockController, DockHost, DockLayout, DockMode, DockPane, DockSide, Edit,
-        Expander, Flyout, For, Form, Icon, Image, InfoBar, InfoBarSeverity, Insets, ItemStatus,
-        Justify, Key, MenuBar, MenuFlyout, NavigationMode, NavigationView, NumberBox,
-        PasswordReveal, ProgressBar, ProgressRing, ProgressStatus, PropertyGrid, RadioButtons,
-        RichText, Row, RowTone, ScrollViewer, SettingsCard, SettingsExpander, Shortcut, Show,
-        Slider, SortDirection, Span, SpinButtons, Split, Stretch, Symbol, TabProgress, TabView,
-        TabWidth, Text, TextEditor, TextEditorController, TextRamp, ThemeColor, TitleBadge,
-        TitleBar, ToggleButton, ToggleSwitch, Token, TreeItem, TreeItems, TreeView, UniformGrid,
-        View, WindowHandle, active_window, on_close_requested, open_window,
+        Align, AreaChart, AutoSuggestBox, Border, Brush, Button, Card, CellValue, CheckBox, Color,
+        Column, ColumnWidth, ComboBox, ContentDialog, DataGrid, DataGridColumn, DataGridDrop,
+        DataGridRow, Density, DockController, DockHost, DockLayout, DockMode, DockPane, DockSide,
+        Edit, Expander, Flyout, For, Form, Icon, Image, InfoBar, InfoBarSeverity, Insets,
+        ItemStatus, Justify, Key, LevelMeter, MenuBar, MenuFlyout, NavigationMode, NavigationView,
+        NumberBox, PasswordReveal, ProgressBar, ProgressRing, ProgressStatus, PropertyGrid,
+        RadioButtons, RichText, Row, RowTone, ScrollViewer, SettingsCard, SettingsExpander,
+        Shortcut, Show, Slider, SortDirection, Span, Sparkline, SpinButtons, Split, Stretch,
+        Symbol, TabProgress, TabView, TabWidth, Text, TextEditor, TextEditorController, TextRamp,
+        ThemeColor, TitleBadge, TitleBar, ToggleButton, ToggleSwitch, Token, TreeItem, TreeItems,
+        TreeView, UniformGrid, View, WindowHandle, active_window, on_close_requested, open_window,
     };
     #[cfg(feature = "markdown")]
     pub use tomni_ui_markdown::MarkdownView;

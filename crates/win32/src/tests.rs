@@ -75,6 +75,20 @@ fn tabela_tem_o_proprio_processo() {
 }
 
 #[test]
+fn o_uso_do_proprio_processo_cresce() {
+    let antes = process_usage(std::process::id()).unwrap();
+    assert!(antes.memory > 0);
+    let fim = std::time::Instant::now() + std::time::Duration::from_millis(200);
+    let mut n = 0_u64;
+    while std::time::Instant::now() < fim {
+        n = std::hint::black_box(n.wrapping_add(1));
+    }
+    let depois = process_usage(std::process::id()).unwrap();
+    assert!(depois.cpu > antes.cpu, "{antes:?} {depois:?}");
+    assert!(process_usage(u32::MAX).is_err());
+}
+
+#[test]
 fn janela_inexistente() {
     assert!(!window_exists(&nome_unico("ClasseQueNaoExiste"), "nada"));
 }

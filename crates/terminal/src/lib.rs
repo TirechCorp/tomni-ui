@@ -46,7 +46,9 @@ pub use session::{LogMode, OutputTap, Session};
 pub use ssh::{HostKey, KnownHost, Ssh, SshBuilder};
 pub use telnet::{Telnet, TelnetBuilder};
 pub use tomni_ui_net::Proxy;
-pub use transport::{Inbox, Loopback, LoopbackHandle, Status, Transport};
+pub use transport::{
+    INBOX_LIMIT, Inbox, Loopback, LoopbackHandle, Status, ThreadMark, Transport, current_thread_id,
+};
 pub use widget::{
     BELL_FLASH, BellStyle, FONT_ZOOM_WHEEL, RichPaste, RichPasteContent, RichPasteSource,
     RightClick, TERMINAL_FONT_MAX, TERMINAL_FONT_MIN, TERMINAL_FONT_SIZE, TERMINAL_MIN_GRID,

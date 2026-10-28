@@ -478,3 +478,24 @@ fn request_focus_in_de_um_efeito_atende_na_janela_dada() {
     app.switch_to(outra);
     assert_eq!(app.focused().as_deref(), Some("campo"));
 }
+
+#[test]
+fn o_titulo_que_muda_chega_a_janela() {
+    let quantas = signal(1);
+    let mut app = TestApp::new(move || {
+        Form::new(move || {
+            if quantas.get() > 1 {
+                "App — principal".to_owned()
+            } else {
+                "App".to_owned()
+            }
+        })
+        .child(Text::new("olá"))
+    });
+    app.frame();
+    let principal = WindowHandle::main();
+    assert_eq!(principal.title(), "App");
+    quantas.set(2);
+    app.frame();
+    assert_eq!(principal.title(), "App — principal");
+}

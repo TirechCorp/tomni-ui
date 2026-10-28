@@ -4,6 +4,7 @@
 //! Trocar o tema é trocar o `Drawer`.
 
 mod card;
+mod chart;
 mod checkbox;
 mod data_grid;
 mod drag;
@@ -46,15 +47,15 @@ use std::rc::Rc;
 
 use tomni_ui_core::{
     BUTTON_ICON_SIZE, BUTTON_ICON_SPACING, BorderVisual, ButtonState, ButtonVariant, ButtonVisual,
-    CaptionButtonVisual, CardVisual, CheckBoxVisual, ComboBoxItemVisual, ComboBoxVisual,
-    CustomLook, DataGridHeaderVisual, DataGridRowVisual, DataGridVisual, Density, DockSide,
-    EditVisual, ExpanderVisual, FieldButtonVisual, ICON_BUTTON_SIZE, ICON_BUTTON_SIZE_COMPACT,
-    IconVisual, ImageVisual, InfoBarVisual, Look, MenuBarItemVisual, MenuItemVisual,
-    NavigationItemVisual, PopupKind, ProgressVisual, PropertyGridCategoryVisual,
-    PropertyGridRowVisual, PropertyGridSizerVisual, RadioButtonVisual, RichTextVisual,
-    ScrollViewerVisual, SettingsCardVisual, SizerVisual, SliderVisual, Symbol, TabHeaderVisual,
-    TabStripButtonVisual, TabViewVisual, TextEditorVisual, TextMetrics, TextVisual,
-    TitleBarButtonVisual, ToggleSwitchVisual, TreeViewItemVisual,
+    CaptionButtonVisual, CardVisual, ChartVisual, CheckBoxVisual, ComboBoxItemVisual,
+    ComboBoxVisual, CustomLook, DataGridHeaderVisual, DataGridRowVisual, DataGridVisual, Density,
+    DockSide, EditVisual, ExpanderVisual, FieldButtonVisual, ICON_BUTTON_SIZE,
+    ICON_BUTTON_SIZE_COMPACT, IconVisual, ImageVisual, InfoBarVisual, LevelMeterVisual, Look,
+    MenuBarItemVisual, MenuItemVisual, NavigationItemVisual, PopupKind, ProgressVisual,
+    PropertyGridCategoryVisual, PropertyGridRowVisual, PropertyGridSizerVisual, RadioButtonVisual,
+    RichTextVisual, ScrollViewerVisual, SettingsCardVisual, SizerVisual, SliderVisual, Symbol,
+    TabHeaderVisual, TabStripButtonVisual, TabViewVisual, TextEditorVisual, TextMetrics,
+    TextVisual, TitleBarButtonVisual, ToggleSwitchVisual, TreeViewItemVisual,
 };
 use tomni_ui_render::kurbo::{BezPath, Point, Rect, RoundedRect, Shape, Size};
 use tomni_ui_render::peniko::{Color, Gradient};
@@ -295,6 +296,18 @@ pub trait Drawer {
     /// Pinta um anel de progresso.
     fn draw_progress_ring(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: ProgressVisual);
 
+    /// Tamanho natural de um gráfico (`AreaChart` ou `Sparkline`).
+    fn measure_chart(&mut self, visual: &ChartVisual) -> Size;
+
+    /// Pinta um gráfico (`AreaChart` ou `Sparkline`).
+    fn draw_chart(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: &ChartVisual);
+
+    /// Tamanho natural de um medidor de nível.
+    fn measure_level_meter(&mut self, visual: &LevelMeterVisual) -> Size;
+
+    /// Pinta um medidor de nível.
+    fn draw_level_meter(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: &LevelMeterVisual);
+
     /// Pinta o fundo de um `Expander`: o cabeçalho, a seta e, aberto, o painel do conteúdo. O
     /// tamanho vem dos filhos.
     fn draw_expander(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: ExpanderVisual);
@@ -511,6 +524,8 @@ pub trait Drawer {
             Look::Slider { header, .. } => self.measure_slider(header),
             Look::ProgressBar(_) => self.measure_progress_bar(),
             Look::ProgressRing(_) => self.measure_progress_ring(),
+            Look::Chart(visual) => self.measure_chart(visual),
+            Look::LevelMeter(visual) => self.measure_level_meter(visual),
             Look::TabHeader {
                 label,
                 visual,
@@ -684,6 +699,8 @@ pub trait Drawer {
             Look::Slider { header, visual } => self.draw_slider(canvas, rect, header, *visual),
             Look::ProgressBar(visual) => self.draw_progress_bar(canvas, rect, *visual),
             Look::ProgressRing(visual) => self.draw_progress_ring(canvas, rect, *visual),
+            Look::Chart(visual) => self.draw_chart(canvas, rect, visual),
+            Look::LevelMeter(visual) => self.draw_level_meter(canvas, rect, visual),
             Look::Expander(visual) => self.draw_expander(canvas, rect, *visual),
             Look::TabView(visual) => self.draw_tab_view(canvas, rect, visual),
             Look::TabHeader { label, visual, .. } => {
@@ -1378,6 +1395,22 @@ impl Drawer for FluentDrawer {
         progress::draw_ring(canvas, rect, visual, &self.tokens);
     }
 
+    fn measure_chart(&mut self, visual: &ChartVisual) -> Size {
+        chart::measure(visual)
+    }
+
+    fn draw_chart(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: &ChartVisual) {
+        chart::draw(canvas, rect, visual, &self.tokens);
+    }
+
+    fn measure_level_meter(&mut self, visual: &LevelMeterVisual) -> Size {
+        chart::measure_level_meter(visual)
+    }
+
+    fn draw_level_meter(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: &LevelMeterVisual) {
+        chart::draw_level_meter(canvas, rect, visual, &self.tokens);
+    }
+
     fn draw_expander(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: ExpanderVisual) {
         expander::draw(canvas, rect, visual, &self.tokens);
     }
@@ -1608,6 +1641,8 @@ impl Drawer for FluentDrawer {
             | Look::NavigationContent { .. }
             | Look::ProgressBar(_)
             | Look::ProgressRing(_)
+            | Look::Chart(_)
+            | Look::LevelMeter(_)
             | Look::FieldButton(_)
             | Look::Expander(_)
             | Look::TabView(_)

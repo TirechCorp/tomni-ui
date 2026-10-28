@@ -4,8 +4,8 @@
 use std::f64::consts::PI;
 
 use tomni_ui_core::{
-    ButtonState, CellValue, DATA_GRID_CELL_PADDING, DataGridHeaderVisual, DataGridRowVisual,
-    DataGridVisual, ProgressVisual, RowTone, SortDirection,
+    ButtonState, CellValue, ChartKind, ChartVisual, DATA_GRID_CELL_PADDING, DataGridHeaderVisual,
+    DataGridRowVisual, DataGridVisual, ProgressVisual, RowTone, SortDirection, ThemeColor, Token,
 };
 use tomni_ui_render::kurbo::{Affine, Point, Rect, RoundedRect, Shape, Size};
 use tomni_ui_render::peniko::Color;
@@ -66,6 +66,27 @@ fn row_fill(t: &Tokens, visual: &DataGridRowVisual) -> Color {
     }
 }
 
+/// O retângulo do calor da célula `index`: a célula inteira, na altura toda da linha, para as
+/// células quentes de linhas vizinhas formarem uma coluna contínua, como no Gerenciador de
+/// Tarefas.
+fn heat_rect(rect: Rect, visual: &DataGridRowVisual, index: usize) -> Option<Rect> {
+    let cell = *visual.cells(rect).get(index)?;
+    Some(Rect::new(cell.x0, rect.y0, cell.x1, rect.y1))
+}
+
+/// O fundo sob o texto da célula `index` (o calor dela sob o da linha), para o contraste.
+fn cell_background(drawer: &FluentDrawer, visual: &DataGridRowVisual, index: usize) -> Color {
+    let t = &drawer.tokens;
+    let base = match crate::chart::heat_fill(t.theme, visual.row.cell_heat(index)) {
+        Some(heat) => heat,
+        None => drawer.backdrop(),
+    };
+    crate::over(row_fill(t, visual), base)
+}
+
+/// Margem de cima e de baixo da minissérie dentro da célula.
+const SPARK_INSET: f64 = 4.0;
+
 /// Onde o texto da célula `index` da linha cabe.
 fn row_text_area(rect: Rect, visual: &DataGridRowVisual, index: usize) -> Option<Rect> {
     let cells = visual.cells(rect);
@@ -116,6 +137,13 @@ pub(crate) fn draw_row(
     let pill = visual.pill(rect);
     let radius = metrics::CONTROL_CORNER_RADIUS;
     let (_, foreground) = row_colors(t, visual.selected, visual.state);
+    for index in 0..visual.columns.len() {
+        if let Some(heat) = crate::chart::heat_fill(t.theme, visual.row.cell_heat(index))
+            && let Some(cell) = heat_rect(rect, visual, index)
+        {
+            canvas.fill(&cell, heat);
+        }
+    }
     let background = row_fill(t, visual);
     if background != Color::TRANSPARENT {
         canvas.fill(&RoundedRect::from_rect(pill, radius), background);
@@ -168,6 +196,18 @@ pub(crate) fn draw_row(
             );
             continue;
         }
+        if let CellValue::Sparkline(values) = value {
+            let spark = ChartVisual {
+                values: values.clone(),
+                max: 1.0,
+                capacity: values.len().max(2),
+                color: ThemeColor::Token(Token::AccentFillColorDefault),
+                kind: ChartKind::Sparkline,
+            };
+            let area = area.inflate(0.0, -SPARK_INSET);
+            crate::chart::draw_series(canvas, area, &spark, t.accent_fill_default);
+            continue;
+        }
         if text.is_empty() {
             continue;
         }
@@ -191,7 +231,6 @@ pub(crate) fn row_info(
     visual: &DataGridRowVisual,
 ) -> Vec<TextInfo> {
     let (_, foreground) = row_colors(&drawer.tokens, visual.selected, visual.state);
-    let background = crate::over(row_fill(&drawer.tokens, visual), drawer.backdrop());
     let mut infos = Vec::new();
     for (index, column) in visual.columns.iter().enumerate() {
         let Some((text, value)) = visual.row.cells.get(index) else {
@@ -199,13 +238,14 @@ pub(crate) fn row_info(
         };
         if (index == 0 && visual.renaming)
             || text.is_empty()
-            || matches!(value, CellValue::Progress(_))
+            || matches!(value, CellValue::Progress(_) | CellValue::Sparkline(_))
         {
             continue;
         }
         let Some(area) = row_text_area(rect, visual, index) else {
             continue;
         };
+        let background = cell_background(drawer, visual, index);
         let (layout, x) = place(drawer, text, STYLE, area, column.align_end);
         let width = f64::from(layout.width());
         let y = text_y(area, STYLE);

@@ -11,6 +11,7 @@ mod link;
 mod pasta;
 mod x11;
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -18,7 +19,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use russh::client::{self, Handle};
 use russh::keys::agent::AgentIdentity;
@@ -27,7 +28,7 @@ use russh::keys::{
     HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey, PublicKeyOrCertificate,
     check_known_hosts_path, known_hosts::learn_known_hosts_path, load_secret_key,
 };
-use russh::{Channel, ChannelMsg, Disconnect, Sig};
+use russh::{Channel, ChannelMsg, ChannelReadHalf, Disconnect, Sig};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, WeakUnboundedSender};
 
@@ -54,6 +55,15 @@ const TERM: &str = "xterm-256color";
 const KEEPALIVE: Duration = Duration::from_secs(30);
 /// Quanto se espera pelo motivo do fim da conexão, depois que o canal fechou sem aviso.
 const END_REASON_WAIT: Duration = Duration::from_millis(200);
+/// Com a fila da interface cheia ([`INBOX_LIMIT`](crate::INBOX_LIMIT)), de quanto em quanto
+/// tempo a sessão confere se abriu vaga para voltar a ler o shell.
+const ROOM_RETRY: Duration = Duration::from_millis(10);
+/// Quantas mensagens do shell são lidas mesmo com a fila cheia depois de uma tecla (até
+/// `KEY_SLACK_TIME`): o `russh` só manda a tecla (o Ctrl+C que para a saída) depois de entregar
+/// o que o servidor mandou antes, e a cada mensagem lida tem metade da chance de mandá-la. 32
+/// pacotes de 32 KiB passam do limite em 1 MiB, no máximo.
+const KEY_SLACK: usize = 32;
+const KEY_SLACK_TIME: Duration = Duration::from_millis(100);
 
 /// Uma sessão SSH, aberta numa thread: conecta, confere a chave do servidor, autentica, pede
 /// um pseudoterminal e o shell. Um erro ("autenticação recusada para ana") aparece no fim da
@@ -576,6 +586,7 @@ fn start(
     let spawned = thread::Builder::new()
         .name("tomni-ui-ssh".into())
         .spawn(move || {
+            let _mark = thread_inbox.mark_thread();
             let flags = Flags {
                 closed: AtomicBool::new(false),
                 connecting: thread_connecting,
@@ -611,6 +622,8 @@ impl Ssh {
 
 impl Drop for Ssh {
     fn drop(&mut self) {
+        // Sem a interface, a sessão não espera mais vaga na fila para ler até o fim.
+        self.inbox.detach();
         let _ = self.commands.send(Command::Close);
     }
 }
@@ -633,6 +646,10 @@ impl Transport for Ssh {
 
     fn pending(&self) -> bool {
         self.inbox.pending()
+    }
+
+    fn threads(&self) -> Vec<u32> {
+        self.inbox.threads()
     }
 
     fn connecting(&self) -> bool {
@@ -992,10 +1009,13 @@ async fn session(
     // Com o `?`, o `Tunnels` solto já para os ouvintes que subiram.
     tunnels.start_all(builder.exit_on_forward_failure).await?;
 
-    let mut channel = if builder.no_shell {
-        None
+    let (mut reader, writer) = if builder.no_shell {
+        (None, None)
     } else {
-        Some(open_shell(builder, &handle, x11.as_deref(), &notice, size).await?)
+        let (reader, writer) = open_shell(builder, &handle, x11.as_deref(), &notice, size)
+            .await?
+            .split();
+        (Some(reader), Some(writer))
     };
     flags.ready();
 
@@ -1004,58 +1024,84 @@ async fn session(
     // resultado do `Handle`.
     let mut lost = false;
     let mut shell_done = false;
+    // O que o shell mandou, fora a saída, enquanto um comando esperava a conexão (`busy`).
+    let mut held = VecDeque::new();
+    // Quantas mensagens, e até quando, o shell é lido mesmo com a fila cheia depois de uma
+    // tecla (`KEY_SLACK`).
+    let mut slack = 0;
+    let mut slack_until = Instant::now();
     // Sem shell, só a queda da conexão ou o `Close` encerram: confere a conexão de tempos em
     // tempos, já que não há canal para avisar.
     let mut watch = tokio::time::interval(Duration::from_millis(250));
     watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
+        // Com a fila da interface cheia (`INBOX_LIMIT`), o shell não é lido: o canal do
+        // `russh` enche e a conexão para de ler a rede, e o servidor espera, como com o `ssh` do
+        // sistema. Os comandos leem enquanto esperam (`busy`), para as teclas irem.
+        let room = inbox.has_room() || (slack > 0 && Instant::now() < slack_until);
         tokio::select! {
-            command = commands.recv() => match command {
-                Some(Command::Data(bytes)) => {
-                    if let Some(channel) = channel.as_ref().filter(|_| !shell_done) {
-                        channel.data_bytes(bytes).await.map_err(|e| ssh_error(&e))?;
+            command = commands.recv() => {
+                let shell = writer.as_ref().filter(|_| !shell_done);
+                let reading = reader.as_mut().filter(|_| !shell_done);
+                match command {
+                    Some(Command::Data(bytes)) => {
+                        if let Some(shell) = shell {
+                            busy(reading, inbox, &mut held, shell.data_bytes(bytes))
+                                .await
+                                .map_err(|e| ssh_error(&e))?;
+                            slack = KEY_SLACK;
+                            slack_until = Instant::now() + KEY_SLACK_TIME;
+                        }
                     }
-                }
-                Some(Command::Resize(cols, rows)) => {
-                    if let Some(channel) = channel.as_ref().filter(|_| !shell_done) {
-                        channel
-                            .window_change(cols.into(), rows.into(), 0, 0)
-                            .await
-                            .map_err(|e| ssh_error(&e))?;
+                    Some(Command::Resize(cols, rows)) => {
+                        if let Some(shell) = shell {
+                            let change = shell.window_change(cols.into(), rows.into(), 0, 0);
+                            busy(reading, inbox, &mut held, change)
+                                .await
+                                .map_err(|e| ssh_error(&e))?;
+                        }
                     }
-                }
-                Some(Command::OpenSubsystem { name, reply }) => {
-                    let opened = open_extra(&handle, &name, &extras, &weak).await;
-                    let _ = reply.send(opened);
-                }
-                Some(Command::OpenExec { command, reply }) => {
-                    let opened = open_extra_exec(&handle, &command, &extras, &weak).await;
-                    let _ = reply.send(opened);
-                }
-                Some(Command::OpenDirect { host, port, reply }) => {
-                    let opened = open_extra_direct(&handle, &host, port, &extras, &weak).await;
-                    let _ = reply.send(opened);
-                }
-                Some(Command::ChannelClosed) => {
-                    if shell_done && extras.load(Ordering::Acquire) == 0 {
+                    Some(Command::OpenSubsystem { name, reply }) => {
+                        let open = open_extra(&handle, &name, &extras, &weak);
+                        let _ = reply.send(busy(reading, inbox, &mut held, open).await);
+                    }
+                    Some(Command::OpenExec { command, reply }) => {
+                        let open = open_extra_exec(&handle, &command, &extras, &weak);
+                        let _ = reply.send(busy(reading, inbox, &mut held, open).await);
+                    }
+                    Some(Command::OpenDirect { host, port, reply }) => {
+                        let open = open_extra_direct(&handle, &host, port, &extras, &weak);
+                        let _ = reply.send(busy(reading, inbox, &mut held, open).await);
+                    }
+                    Some(Command::ChannelClosed) => {
+                        if shell_done && extras.load(Ordering::Acquire) == 0 {
+                            break;
+                        }
+                    }
+                    Some(Command::Forward(command)) => {
+                        busy(reading, inbox, &mut held, tunnels.command(command)).await;
+                    }
+                    Some(Command::Close) | None => {
+                        if let Some(shell) = shell {
+                            let _ = shell.close().await;
+                        }
                         break;
                     }
                 }
-                Some(Command::Forward(command)) => tunnels.command(command).await,
-                Some(Command::Close) | None => {
-                    if let Some(channel) = channel.as_ref().filter(|_| !shell_done) {
-                        let _ = channel.close().await;
-                    }
-                    break;
-                }
             },
             message = async {
-                match channel.as_mut() {
-                    Some(channel) => channel.wait().await,
-                    None => std::future::pending().await,
+                match held.pop_front() {
+                    Some(message) => message,
+                    None => match reader.as_mut() {
+                        Some(reader) => reader.wait().await,
+                        None => std::future::pending().await,
+                    },
                 }
-            }, if !shell_done => match message {
+            }, if !shell_done && (room || !held.is_empty()) => match message {
                 Some(ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. }) => {
+                    if !inbox.has_room() {
+                        slack = slack.saturating_sub(1);
+                    }
                     inbox.push(&data);
                 }
                 Some(ChannelMsg::ExitStatus { exit_status }) => {
@@ -1090,11 +1136,13 @@ async fn session(
                 }
                 Some(_) => {}
             },
+            // Sem vaga, confere de novo daqui a pouco.
+            () = tokio::time::sleep(ROOM_RETRY), if !room => {}
             // Com o shell encerrado, ou sem shell, só a queda da conexão acorda o laço além
             // dos comandos.
-            _ = watch.tick(), if shell_done || channel.is_none() => {
+            _ = watch.tick(), if shell_done || reader.is_none() => {
                 if handle.is_closed() {
-                    lost = channel.is_none();
+                    lost = reader.is_none();
                     break;
                 }
             }
@@ -1116,6 +1164,37 @@ async fn session(
     };
     Connected { handle, jumps }.disconnect().await;
     Ok(exit)
+}
+
+/// Espera `op`, que precisa da conexão andando, lendo o shell ao mesmo tempo. O `russh` para a
+/// conexão inteira (teclas, túneis, keepalive) enquanto o canal do shell está cheio; com a fila
+/// da interface no limite, `op` esperaria para sempre. A saída vai para a fila, passando do
+/// limite; o resto fica em `held`, na ordem, para o laço tratar.
+async fn busy<T>(
+    reader: Option<&mut ChannelReadHalf>,
+    inbox: &Inbox,
+    held: &mut VecDeque<Option<ChannelMsg>>,
+    op: impl Future<Output = T>,
+) -> T {
+    let Some(reader) = reader else {
+        return op.await;
+    };
+    let mut op = std::pin::pin!(op);
+    let mut open = true;
+    loop {
+        tokio::select! {
+            out = &mut op => return out,
+            message = reader.wait(), if open => match message {
+                Some(ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. }) => {
+                    inbox.push(&data);
+                }
+                message => {
+                    open = matches!(message, Some(ref m) if !matches!(m, ChannelMsg::Close));
+                    held.push_back(message);
+                }
+            },
+        }
+    }
 }
 
 /// "O shell terminou; esperando 2 conexões dos túneis (feche a aba para encerrar)."

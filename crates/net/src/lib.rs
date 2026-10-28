@@ -1,16 +1,19 @@
 //! Rede do Tomni UI (M30): o [`Proxy`] (SOCKS5 e HTTP CONNECT) e a abertura da conexão TCP
 //! (`connect`), com as mensagens de erro em português. É a base do SSH, do Telnet e, depois, do
-//! FTP e do S3; não depende de nenhuma outra parte da lib.
+//! FTP e do S3; não depende de nenhuma outra parte da lib. O [`HttpProxyServer`] é o outro
+//! lado: um proxy HTTP local que leva o navegador por um caminho que o app escolhe.
 
 #[cfg(feature = "http")]
 pub mod http;
 mod proxy;
+mod proxy_server;
 
 use std::io;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 pub use proxy::Proxy;
+pub use proxy_server::{Dial, HttpProxyServer};
 
 /// Quanto se espera, por padrão, para o TCP chegar ao servidor.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);

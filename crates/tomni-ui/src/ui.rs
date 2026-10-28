@@ -2,6 +2,7 @@
 
 use slotmap::SecondaryMap;
 use tomni_ui_core::kurbo::{Point, Rect, Shape, Size, Vec2};
+use tomni_ui_core::stages;
 use tomni_ui_core::{
     Clipboard, Cursor, DragData, FocusSource, Ime, Insets, Key, Look, Modifiers, NativeFocus,
     NativePlace, NodeId, PointerKind, RESIZE_BORDER, ResizeEdge, TextInput, ThemeColor, Token,
@@ -600,6 +601,7 @@ impl Ui {
         // Os cliques na bandeja do sistema também.
         tomni_ui_core::tray::deliver();
         tomni_ui_core::clipboard::flush(self.tree.clipboard_mut());
+        let efeitos = stages::stage("efeitos");
         loop {
             run_effects();
             untrack(|| self.tree.sync_focus());
@@ -617,6 +619,8 @@ impl Ui {
             }
         }
 
+        drop(efeitos);
+        let layout = stages::stage("layout");
         changed.extend(self.tree.take_dirty());
         changed.extend(self.blinked.take());
         if std::mem::take(&mut self.invalidate_all) {
@@ -669,6 +673,8 @@ impl Ui {
                 break;
             }
         }
+        drop(layout);
+        let _gravacao = stages::stage("gravação");
         record.sort_unstable_by_key(|&id| self.tree.position(id));
         record.dedup();
 

@@ -1518,6 +1518,7 @@ impl Widget for TerminalPanes {
         let Some(share) = u32::try_from(hidden.len()).ok().filter(|&n| n > 0) else {
             return;
         };
+        let _ocultos = tomni_ui_core::stages::stage("terminais ocultos");
         for session in hidden {
             session.pump(Some(READ_BUDGET / share));
         }

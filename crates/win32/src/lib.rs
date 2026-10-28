@@ -3,7 +3,8 @@
 //! O Pageant (o agente do PuTTY) e o pid de quem pede uma chave precisam de
 //! `CryptProtectMemory`, `GetUserNameExA`, uma janela oculta com `WM_COPYDATA`, um file mapping
 //! com a checagem do dono, `GetNamedPipeClientProcessId`, `CreateToolhelp32Snapshot` e um pipe
-//! com security descriptor própria. A pesquisa não achou crate com API segura para nenhuma
+//! com security descriptor própria. O medidor de CPU do app lê `GetProcessTimes` e
+//! `GetProcessMemoryInfo`. A pesquisa não achou crate com API segura para nenhuma
 //! delas, e o usuário aprovou o `unsafe` contido aqui em 19/10.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
@@ -25,7 +26,7 @@ mod tests;
 
 pub use crypto::{pageant_user_name, protect_memory_cross_process};
 pub use pipe::{named_pipe_client_pid, private_pipe};
-pub use process::{ProcessEntry, process_table};
+pub use process::{ProcessEntry, ProcessUsage, process_table, process_usage};
 pub use window::{CopyDataWindow, window_exists};
 
 use std::io;

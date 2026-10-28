@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::time::Instant;
 
 use tomni_ui_core::Color as Rgba;
 use tomni_ui_render::kurbo::{Rect, RoundedRect, Shape, Stroke, Vec2};
@@ -210,8 +211,21 @@ pub(crate) fn measure(visual: &TerminalVisual) -> tomni_ui_render::kurbo::Size {
     visual.natural_size()
 }
 
-/// Pinta o terminal em `rect`.
+/// Pinta o terminal em `rect` e soma o tempo ao da sessão ([`TerminalVisual::add_busy`]).
 pub(crate) fn draw(
+    canvas: &mut dyn Canvas,
+    rect: Rect,
+    visual: &TerminalVisual,
+    tokens: &Tokens,
+    fonts: &mut Fonts,
+    cache: &mut Cache,
+) {
+    let start = Instant::now();
+    paint(canvas, rect, visual, tokens, fonts, cache);
+    visual.add_busy(start.elapsed());
+}
+
+fn paint(
     canvas: &mut dyn Canvas,
     rect: Rect,
     visual: &TerminalVisual,

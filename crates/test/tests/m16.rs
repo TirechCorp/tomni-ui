@@ -379,3 +379,29 @@ fn sem_title_bar_nada_muda() {
         "sem barra, o estado da janela não é guardado"
     );
 }
+
+/// A barra com um subtítulo `sub` e a busca no meio.
+fn com_subtitulo(sub: Option<&'static str>) -> impl View {
+    let busca = signal(String::new());
+    let mut barra = TitleBar::new("Leitor").icon(Symbol::Book).content(
+        AutoSuggestBox::bind(busca, |_| Vec::new())
+            .id("busca")
+            .width(280)
+            .placeholder("Buscar"),
+    );
+    if let Some(sub) = sub {
+        barra = barra.subtitle(sub);
+    }
+    Form::new("Leitor").title_bar(barra).child(Column::new())
+}
+
+#[test]
+fn subtitulo_vazio_some_e_nao_desloca_o_conteudo() {
+    let busca = |sub: Option<&'static str>| {
+        let mut app = TestApp::new(move || com_subtitulo(sub)).size(720, 120);
+        app.frame();
+        app.rect("busca")
+    };
+    assert_eq!(busca(Some("")), busca(None));
+    assert_ne!(busca(Some("Uma versão bem comprida")), busca(None));
+}

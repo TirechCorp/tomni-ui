@@ -134,10 +134,12 @@ Form::new("Conexões").density(Density::Compact).child(
 | `RadioButtons::bind(signal, opcoes)` | escolher uma entre poucas opções, todas à vista, ligado a um `Signal<String>` | `.header(prop)`, `.disabled(prop)` |
 | `Slider::bind(signal, 0..=100)` | um número numa faixa, ligado a um `Signal<f64>` | `.step(n)` (padrão 1), `.header(prop)`, `.disabled(prop)` |
 | `ProgressBar::new()` / `ProgressRing::new()` | andamento de uma tarefa; sem `.value`, indeterminado (animação contínua) | `.value(prop)` de 0 a 1; `.paused(prop)` e `.error(prop)` pintam com a cor do estado |
+| `AreaChart::new(serie)` / `Sparkline::new(serie)` | gráfico de área de um uso no tempo (CPU, memória, rede), como no Gerenciador de Tarefas; a `Sparkline` é a miniatura, sem grade | `.max(n)` (padrão 100), `.capacity(n)` (pontos à vista, padrão 60), `.color(Token::..)` |
+| `LevelMeter::new(nivel)` | medidor de quadradinhos, do amarelo-claro ao vermelho-escuro, para um nível de 0 a 1 (a CPU na barra de título) | `.segments(n)` (padrão 10), `.on_click(move \|\| ...)` (vira botão), `.tooltip(prop)` |
 | `Expander::new(cabecalho, signal_bool)` | seção recolhível (sanfona): o cabeçalho abre e fecha o conteúdo | `.content(view)`, `.description(texto)` |
 | `TabView::bind(signal)` | abas, ligadas a um `Signal<String>` com a chave da aba escolhida | `.tab(chave, titulo, view)` (uma por aba), `.items(lista, \|t\| chave, \|t\| titulo, \|t\| view)` (uma por item), `.on_close(move \|chave\| ...)` (o X), `.on_add(move \|\| ...)` (o "+"), `.on_reorder(move \|de, para\| ...)` (arrastar a aba), `.tab_context_flyout(\|chave\| MenuFlyout)` (menu de contexto da aba), `.tab_width(TabWidth::SizeToContent)` |
 | `NavigationView::bind(signal)` | painel de navegação à esquerda e a página do item escolhido ao lado; o signal guarda a chave do item | `.item(chave, Symbol::Home, rotulo, view)`, `.group(chave, icone, rotulo, \|g\| g.item(...))`, `.header(texto)`, `.footer_item(...)`, `.settings(view)`, `.search(AutoSuggestBox)`, `.pane_mode(NavigationMode::Compact)` |
-| `TitleBar::new(titulo)` | a barra de título desenhada pelo app, no lugar da do sistema (vai no `Form::title_bar`) | `.subtitle(prop)`, `.icon(Symbol::Library)`, `.back(prop)` e `.on_back(move \|\| ...)` (o voltar), `.back_enabled(prop)`, `.content(view)` (no meio: a busca), `.right_header(view)` |
+| `TitleBar::new(titulo)` | a barra de título desenhada pelo app, no lugar da do sistema (vai no `Form::title_bar`) | `.subtitle(prop)` (vazio, some sem deixar espaço), `.icon(Symbol::Library)`, `.back(prop)` e `.on_back(move \|\| ...)` (o voltar), `.back_enabled(prop)`, `.content(view)` (no meio: a busca), `.right_header(view)` |
 | `AutoSuggestBox::bind(signal, sugerir)` | campo de texto com sugestões numa lista embaixo (autocompletar) | `.placeholder(prop)`, `.query_icon(Symbol::Search)` (lupa no fim, que chama o `on_submit`), `.disabled(prop)`, `.on_submit(move \|valor\| ...)` |
 | `MenuFlyout::new()` | menu de ações aberto por um botão (`Button::flyout`), por um item da `MenuBar` ou como menu de contexto (`.context_flyout`) | `.item(id, rotulo, move \|\| ...)`, `.toggle(id, rotulo, signal_bool)` (item com a marca ✓), `.radio(id, rotulo, signal, valor)` (item de rádio: marcado quando o signal vale `valor`; escolher grava e fecha), `.submenu(id, rotulo, MenuFlyout)`, `.separator()`, `.open(signal)`; depois de um item, `.icon(Symbol::Save)`, `.shortcut(Shortcut::ctrl('S'))` (o atalho, que aparece à direita e vale com o menu fechado), `.item_visible(cond)` (mostra o item só enquanto `cond` vale: reserve itens a mais para listas que mudam, como as janelas abertas) `.item_enabled(cond)` (o item fica esmaecido enquanto `cond` não vale: não responde ao clique, ao atalho nem ao Enter e o teclado passa por cima dele; a `cond` pode ser um signal) e `.access_key('1')` (a tecla de acesso: com o menu aberto, a tecla aciona o item; não aparece sublinhada); no menu, `.highlighted(signal_opcao_string)` grava o id do item em realce (para o app mostrar para onde a ação vai levar) |
 | `MenuBar::new()` | barra de menus no alto da janela de desktop (Arquivo, Editar, Ajuda) | `.menu(titulo, MenuFlyout)` (um por item), `.access_key('A')` (o Alt+A abre o último menu) |
@@ -488,7 +490,7 @@ Os ícones do `Symbol`, por grupo:
 - **Navegação**: `Home`, `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `ChevronLeft`, `ChevronRight`, `ChevronUp`, `ChevronDown`, `Navigation`, `MoreHorizontal`, `MoreVertical`, `Open`, `ArrowClockwise`, `ArrowCounterclockwise`, `ArrowSync`, `ArrowUndo`, `ArrowRedo`, `ArrowExit`, `SignOut`, `ArrowEnter`, `Grid`, `Apps`, `AppsList`, `PanelLeft`, `PanelRight`, `PanelBottom`, `SplitVertical`, `SplitHorizontal`, `Globe`, `Map`, `Location`, `Compass`, `Search`, `Filter`, `ArrowSort`, `ZoomIn`, `ZoomOut`, `FullScreenMaximize`, `FullScreenMinimize`, `Maximize`, `Dismiss`.
 - **Ações**: `Add`, `Subtract`, `Edit`, `Delete`, `Save`, `Copy`, `Cut`, `ClipboardPaste`, `Share`, `Send`, `Print`, `Checkmark`, `Pin`, `PinOff`, `Star`, `StarFilled`, `StarOff`, `Heart`, `HeartFilled`, `Bookmark`, `BookmarkFilled`, `Flag`, `Tag`, `Link`, `Attach`, `Archive`, `Rename`, `LockClosed`, `LockOpen`, `Key`, `Eye`, `EyeOff`, `Options`, `ArrowReply`, `ArrowForward`, `ArrowDownload`, `ArrowUpload`, `Cloud`, `CloudArrowUp`, `CloudArrowDown`, `SelectAll`.
 - **Arquivos e conteúdo**: `Document`, `DocumentAdd`, `DocumentText`, `Folder`, `FolderOpen`, `FolderAdd`, `Image`, `ImageMultiple`, `Video`, `MusicNote`, `Code`, `Database`, `Server`, `Clipboard`, `Notepad`, `Book`, `Library`, `Briefcase`, `Box`.
-- **Status**: `Info`, `Warning`, `ErrorCircle`, `CheckmarkCircle`, `DismissCircle`, `QuestionCircle`, `Alert`, `AlertOff`, `Shield`, `ShieldCheckmark`, `Clock`, `History`, `Calendar`, `Hourglass`, `Circle`, `CircleFilled`, `Sparkle`, `Lightbulb`, `Bug`, `Wifi`, `Battery`, `Flash`.
+- **Status**: `Info`, `Warning`, `ErrorCircle`, `CheckmarkCircle`, `DismissCircle`, `QuestionCircle`, `Alert`, `AlertOff`, `Shield`, `ShieldCheckmark`, `Clock`, `History`, `Calendar`, `Hourglass`, `Circle`, `CircleFilled`, `Sparkle`, `Lightbulb`, `Bug`, `Wifi`, `Battery`, `Flash`, `DataArea`.
 - **Mídia**: `Play`, `Pause`, `Stop`, `Previous`, `Next`, `Record`, `Speaker`, `SpeakerMute`, `Mic`, `MicOff`, `Camera`, `Headphones`, `FastForward`, `Rewind`, `Broadcast`.
 - **Sistema e pessoas**: `Settings`, `Person`, `People`, `PersonAdd`, `PersonCircle`, `Color`, `PaintBrush`, `DarkTheme`, `WeatherMoon`, `WeatherSunny`, `Desktop`, `Laptop`, `Phone`, `Tablet`, `Keyboard`, `Window`, `WindowNew`, `PlugConnected`, `Power`, `Accessibility`, `LocalLanguage`, `TextFont`, `Wrench`, `Toolbox`.
 - **Comunicação**: `Mail`, `Chat`, `ChatMultiple`, `Comment`, `Call`, `Megaphone`.
@@ -530,6 +532,18 @@ barra com estado fica cheia e parada. O `ProgressRing` tem o mesmo `.paused(prop
 `.error(prop)`: o anel com estado, sem `.value`, é inteiro e parado, na cor do estado.
 `app.look("id")` dá `Look::ProgressBar(v)` com `v.status` (`ProgressStatus::{Normal, Paused,
 Error}`); o anel é `Look::ProgressRing(v)`.
+
+**`AreaChart`, `Sparkline` e `LevelMeter`**: os gráficos recebem a série inteira
+(`Vec<f64>`, fixa, closure ou `Signal`), do ponto mais antigo ao mais novo; mostram os
+`.capacity(..)` mais novos, com o mais novo na borda direita, na escala de 0 a `.max(..)`.
+Guarde a série num signal e limite o tamanho no app (`if s.len() > 60 { s.remove(0); }`). O
+`AreaChart` tem 160×100 de tamanho natural (use `.grow(1)` ou `.height(..)`), a `Sparkline`
+72×40. O `LevelMeter` acende `nivel × segmentos` quadradinhos; com `.on_click` recebe foco e
+Enter, e precisa de `.height(44)` para o alvo de toque. Não são acessíveis só pela cor:
+mostre o número num `Text` ou no `.tooltip`. `app.value("id")` dá o nível do medidor e o
+ponto mais novo do gráfico (falha se a série está vazia); `app.look("id")` dá
+`Look::Chart(v)` (`v.kind`: `ChartKind::{Area, Sparkline}`) ou `Look::LevelMeter(v)`. Exemplo:
+`crates/tomni-ui/examples/desempenho.rs`.
 
 **`Expander`**: o cabeçalho (48 px) abre e fecha com clique, Enter ou Espaço; o signal
 acompanha. Fechado, o conteúdo sai do layout e do Tab; o estado dele (texto digitado) fica.
@@ -980,9 +994,14 @@ fn arquivos() -> impl View {
 
 - **Células**: `DataGridRow::cell(texto, valor)`, uma por coluna, na ordem das colunas. O valor é
   `CellValue::Text` (ordem natural, sem acento nem maiúsculas: "a2" antes de "a10"), `Number`,
-  `Time(Option<SystemTime>)` (`None` vem antes de qualquer data) ou `Progress(0.0..=1.0)` (a
-  célula desenha uma barra de andamento; o texto vira o nome acessível). **Não há célula com
-  widget**: só texto, o ícone na primeira coluna (`.icon`) e o `Progress`.
+  `Time(Option<SystemTime>)` (`None` vem antes de qualquer data), `Progress(0.0..=1.0)` (a
+  célula desenha uma barra de andamento; o texto vira o nome acessível) ou
+  `Sparkline(Vec<f64>)` (uma minissérie de 0 a 1 no lugar do texto, que vira o nome acessível;
+  ordena pela média). **Não há célula com widget**: só texto, o ícone na primeira coluna
+  (`.icon`), o `Progress` e a `Sparkline`.
+- **Calor**: `.heat(0.0..=1.0)` logo depois de um `.cell(..)` pinta o fundo daquela célula do
+  amarelo-claro ao vermelho (o "calor" das colunas do Gerenciador de Tarefas); 0 não pinta. O
+  texto mantém o contraste, e `DataGridRow::cell_heat(i)` lê o valor.
 - **Ordem**: o clique no cabeçalho ordena (de novo, inverte); `.sort(signal)` guarda a coluna
   (a chave dela) e o `SortDirection`; `DataGridColumn::not_sortable()` desliga. `DataGridRow::rank`
   (".." 0, pastas 1, arquivos 2) fica antes da coluna e **não inverte** na ordem decrescente.
@@ -1540,6 +1559,18 @@ dois proxies, cada um com o seu `known_hosts`. O `Telnet::builder` tem o `.proxy
 `.before_connect` iguais. O `Proxy` mostra a senha como `…` no `Debug`. Não há redirecionamento
 de portas nem X11.
 
+**Proxy HTTP local para o navegador** (`tomni_ui::net::HttpProxyServer`, sempre presente).
+`HttpProxyServer::start(|host, porta| tomni_ui::net::connect(host, porta, Some(&proxy),
+CONNECT_TIMEOUT))?` ouve numa porta livre do `127.0.0.1` e leva cada pedido pela função de
+discagem que o app dá (direto, por um `Proxy`, pela ponte SOCKS de uma VPN embutida): o nome
+chega sem resolver, para ser resolvido do lado de lá. Entende o `CONNECT` (HTTPS, WebSockets) e
+o pedido em forma absoluta do HTTP puro, que segue em forma de origem, sem os cabeçalhos do
+proxy e com `Connection: close`. `url()` dá `http://127.0.0.1:porta`, para o `--proxy-server`
+do Chromium ou o `network.proxy.http` do Firefox; `addr()`, `connections()`. Uma discagem que
+falha vira `502` com a mensagem em português; outro esquema, `501`. Não pede usuário e senha (os
+navegadores não aceitam a credencial na linha de comando). Para quando é solto ou com `stop()`,
+e derruba os túneis abertos.
+
 **Rede Nebula embutida** (crate `tomni-ui-nebula`, sem placa virtual e sem administrador; só o
 tráfego do app entra na rede, o sistema não vê nada). `NebulaBuilder::new(Config::from_yaml(yaml,
 Some(pasta_dos_certificados))?.0).on_state(|estado| ..).start().await?` sobe a rede; o config é o
@@ -1550,7 +1581,7 @@ com porta e credencial aleatórias: passe-o ao `.proxy(..)` do `Ssh::builder`, d
 e do `Sftp`, ou ao `Proxy::open`; mostre-o na interface nunca (nem porta nem credencial) e não o
 exponha a outros programas. `state()` é `Connecting`, `Connected { address, lighthouses, tunnels }`,
 `Retrying(msg)`, `Failed(msg)` ou `Stopped`; `wait_connected(limite)` espera; `tunnels()` lista
-os pares; `stop().await` avisa os pares com `CloseTunnel`. Certificados v1 e v2, `aes` e
+os pares; `stop().await` avisa os pares com `CloseTunnel`; `close()` pede o mesmo sem esperar e sem consumir a `Nebula` (quando ela está num `Arc` dividido com as conexões, o estado vai a `Stopped`). Certificados v1 e v2, `aes` e
 `chachapoly`. Sem relays e sem P-256 por enquanto (um certificado P-256 é lido, mas usá-lo dá
 "certificado P-256 ainda não é suportado"). Nos testes, a feature `test-util` dá o `SimNet`
 (UDP e NAT em memória) e `NebulaBuilder::start_on(..)`.
@@ -1565,7 +1596,7 @@ viram avisos para mostrar ao usuário; `config.without_secrets()` é a versão p
 aleatórias: passe-o ao `.proxy(..)` do `Ssh::builder`, do `Telnet::builder` e do `Sftp`; nunca
 mostre a porta nem a credencial e não o exponha a outros programas. `state()` é `Connecting`,
 `Connected { address, peers_up, peers }`, `Retrying(msg)`, `Failed(msg)` ou `Stopped`;
-`wait_connected(limite)` espera o primeiro handshake; `peers()` lista os pares; `stop(espera)`.
+`wait_connected(limite)` espera o primeiro handshake; `peers()` lista os pares; `stop(espera)` (ou `close()`, que não espera nem consome o motor, para quando ele está num `Arc` dividido).
 Os `AllowedIPs` mandam: um destino fora deles falha na hora com "… não está nos AllowedIPs de
 nenhum par". A pilha é só IPv4 por enquanto (um `Endpoint` só com IPv6 dá erro), e o `DNS` do
 `.conf` é lido, mas ainda não resolve nomes dentro do túnel.
@@ -1588,7 +1619,7 @@ não existe falha na hora. `State` é `Connecting`, `NeedsLogin { url }`, `Needs
 `Connected { address, tailnet, peers_online, derp_home }`, `Expired`, `Retrying(msg)`,
 `Failed(msg)` ou `Stopped`; `peers()` lista as máquinas com `online` e o caminho (`direto (ip:porta)`
 ou `DERP (região)`); `wait_connected(limite)`; `logout()` pede ao controle que a chave vença;
-`stop(espera)`. O nó fica sempre em ShieldsUp: não atende nada que chegue pela tailnet, não anuncia
+`stop(espera)` (ou `close()`, que não espera nem consome o motor, para quando ele está num `Arc` dividido). O nó fica sempre em ShieldsUp: não atende nada que chegue pela tailnet, não anuncia
 rotas e não é saída. Uma máquina desligada, uma chave vencida e um IP fora da tailnet falham
 na hora com mensagem em português. Nos testes, a feature `test-util` dá o `ControlFake`
 (`testing`, no modo tailnet), o `DerpFake` e `spawn_stun`.
@@ -1613,7 +1644,7 @@ nomes do domínio que a rede anuncia vão por DNS sobre TCP aos servidores dela.
 `NotFound`, `AuthenticationRequired` (login único pelo navegador, ainda não tratado),
 `Connected { address, name, warnings }`, `Retrying(msg)`, `Failed(msg)` ou `Stopped`;
 `wait_connected(limite)`, `peers()` e `roots()` (endereço, papel, caminho direto ou pelo raiz e
-latência), `stop(espera)`. O nó só leva TCP em IPv4, não recebe conexões (o filtro deixa entrar
+latência), `stop(espera)` (ou `close()`, que não espera nem consome o motor, para quando ele está num `Arc` dividido). O nó só leva TCP em IPv4, não recebe conexões (o filtro deixa entrar
 só a resposta do que o app abriu) e não responde a nada que não pediu. Sem UDP a rede não
 funciona nesta versão. Nos testes, a feature `test-util` dá o `RootFake` e o
 `ControllerFake` (`testing`), que sobem numa `SimNet` ou em UDP real.
@@ -1639,7 +1670,7 @@ conexão sozinha (`ping-restart`, `RESTART`, rede fora) com espera crescente; um
 (`HALT`, certificado inválido, `ping-exit`) vira `Failed`. Os DNS e domínios que o servidor empurra
 valem só dentro da ponte (um nome do domínio de busca é resolvido pela VPN; o resto, pelo sistema,
 a menos que o perfil tenha `redirect-gateway`). `wait_connected(limite)` espera e devolve o
-endereço; `stop(espera)` avisa o servidor e encerra. Suportado: UDP e TCP, `tls-auth`, `tls-crypt`,
+endereço; `stop(espera)` (ou `close()`, que não espera nem consome o motor, para quando ele está num `Arc` dividido) avisa o servidor e encerra. Suportado: UDP e TCP, `tls-auth`, `tls-crypt`,
 `tls-crypt-v2` (cliente), TLS 1.2 e 1.3, AES-128/256-GCM e ChaCha20-Poly1305, `compress` em
 passagem, `static-challenge` e `reneg-sec`. Ainda não: cifras CBC, LZ4 e LZO de
 verdade, IPv6 dentro da VPN, PKCS#12, `crl-verify` e `http-proxy`/`socks-proxy` do perfil.
@@ -1736,7 +1767,12 @@ No `tirech-omni/crates/tirech-omni`: `tela/tuneis.rs` (editor e túneis ativos) 
 (virt-manager e aplicativos gráficos).
 
 Para um programa seu, implemente `tomni_ui::terminal::Transport` (`write`, `read`, `pending`;
-`resize` é opcional) com uma `Inbox`, como o exemplo `terminal` do Tomni UI.
+`resize` é opcional) com uma `Inbox`, como o exemplo `terminal` do Tomni UI. A `Inbox` guarda
+até `INBOX_LIMIT` (1 MiB) do que chegou e a interface ainda não leu: a thread que lê o programa
+usa `inbox.push_wait(&bytes)`, que espera vaga (o programa que despeja sem fim fica esperando,
+como num terminal de verdade, e a memória não cresce), ou confere `inbox.has_room()` antes de ler
+mais; `push` não espera (mensagens curtas, avisos). No `Drop` do transporte, chame
+`inbox.detach()`: solta a thread que espera vaga e descarta o que vier depois.
 
 Builders: `.id(id)`, `.grow(1)` ou `.width(n)`/`.height(n)`, `.cols_rows(80, 24)` (grade fixa;
 sem ele, a grade segue o tamanho do widget, no mínimo 20 × 5), `.font_size(n)` (Cascadia
@@ -1931,7 +1967,10 @@ pub fn tela() -> impl View {
   `log_with(Box<dyn Write>, modo)` (o mesmo log num escritor seu, por exemplo um arquivo cifrado: o `flush` só vem do
   `flush_log()`, e soltar o log solta o escritor), `is_logging()` e
   `stop_log()`, `received()` (quantos bytes chegaram pela conexão; o `feed` não conta, então um aviso
-  seu não parece saída do servidor), `tap()` (um `OutputTap` que guarda o texto limpo, como no log
+  seu não parece saída do servidor), `sent()` (quantos bytes foram para a conexão), `busy()` (o
+  `Duration` que a interface gastou com a sessão: ler, interpretar e pintar), `threads()` (os ids
+  das threads da conexão no sistema, para medir a CPU delas em `/proc/self/task/<id>/stat`; vazio
+  fora do Linux e no `Loopback`; com o `process_id()` do shell local, dá o peso de cada aba), `tap()` (um `OutputTap` que guarda o texto limpo, como no log
   de texto, que chega depois dele; `take()` devolve e esvazia, e soltar o tap para de guardar; sem
   teto, então chame `take()` a cada verificação), `dispose()` (solta a conexão; chame ao fechar a
   aba) e `Session::find(chave)`. `selection_text()` devolve o texto selecionado no `Terminal`
@@ -2759,8 +2798,8 @@ As teclas: `Enter`, `Space`, `Tab`, `Escape`, `Backspace`, `Delete`, `Left`, `Ri
   do `RadioButtons` ou do `AutoSuggestBox`; a chave da aba escolhida no `TabView` ou do item
   escolhido no `NavigationView`; o rótulo de um item dele), `tab_titles(id)` (os títulos das
   abas do `TabView`, em ordem),
-  `value(id)` (`f64` do `Slider` ou do `NumberBox`, ou o andamento de 0 a 1 da `ProgressBar`/`ProgressRing`; falha
-  no indeterminado), `checked(id)` (`CheckBox` marcada, `ToggleButton` ou `ToggleSwitch` ligado, opção de rádio
+  `value(id)` (`f64` do `Slider` ou do `NumberBox`, o andamento de 0 a 1 da `ProgressBar`/`ProgressRing`, o
+  nível do `LevelMeter` ou o ponto mais novo do `AreaChart`/`Sparkline`; falha no indeterminado e na série vazia), `checked(id)` (`CheckBox` marcada, `ToggleButton` ou `ToggleSwitch` ligado, opção de rádio
   escolhida, aba ou item do `NavigationView` escolhido), `visible(id)`, `enabled(id)`, `focused()` (id com foco),
   `rect(id)` (na janela, já com a rolagem; um `kurbo::Rect` com `x0`, `y0`, `x1` e `y1`),
   `in_view(id)` (`false` se rolado para fora), `scroll_offset(id)` e `scroll_content(id)` (do
@@ -2858,6 +2897,20 @@ o rastro. A saída de um terminal, o `wake()` de outra thread e as animações n
 entrada: um terminal despejando texto sem ninguém mexer, ou um `ProgressRing` à mostra por mais
 de 5 s, também caem nos 10 quadros por segundo (e no aviso). O `TestApp` não passa pelo runner:
 os testes não mudam.
+
+### Registro de travamentos
+
+`App::new(tela).stall_log(pasta.join("travamentos.log"))` liga uma thread vigia que escreve no
+arquivo quando a interface fica parada mais de 2 s numa etapa: qual (`evento`, `acordar`,
+`ciclo › prazos › terminal`, `desenho › textura`, `desenho › apresentação`, `efeitos`, `layout`,
+`gravação`...), o estado da thread da interface (rodando, dormindo, esperando o disco), a carga,
+a memória do app e do sistema, o swap e as threads do app que mais gastaram CPU. Repete a cada
+10 s e diz quanto durou. A cada minuto em que a interface usou mais de 30% de uma CPU, ou uma
+etapa passou de meio segundo, escreve o tempo por etapa; o aviso do ritmo limitado também vai
+para lá. O estado do sistema só aparece no Linux; o arquivo recomeça acima de 1 MiB. Sem o
+`stall_log`, nada é medido. Para marcar uma etapa sua (uma conta pesada num efeito), use
+`let _etapa = tomni_ui::stages::stage("minha conta");`: o guarda fecha a etapa ao sair de
+escopo, e ela aparece dentro da etapa em que estava (`ciclo › prazos › minha conta`).
 
 ## Erros comuns
 

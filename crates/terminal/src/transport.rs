@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 /// Se a conexão continua aberta, depois de uma leitura.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -112,6 +112,14 @@ pub trait Transport {
         None
     }
 
+    /// Os ids, no sistema, das threads que trabalham para a conexão (as que leem, decifram e
+    /// escrevem), para o app olhar o tempo de CPU delas. Vazio se o transporte não sabe (o
+    /// padrão) ou fora do Linux. Os transportes da lib marcam as threads com
+    /// [`Inbox::mark_thread`] e devolvem [`Inbox::threads`].
+    fn threads(&self) -> Vec<u32> {
+        Vec::new()
+    }
+
     /// Por onde abrir canais de subsistema (o SFTP) na mesma conexão, sem autenticar de novo.
     /// `None` se a conexão não é SSH (o padrão).
     #[cfg(feature = "ssh")]
@@ -167,6 +175,10 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
         (**self).process_id()
     }
 
+    fn threads(&self) -> Vec<u32> {
+        (**self).threads()
+    }
+
     #[cfg(feature = "ssh")]
     fn ssh_channels(&self) -> Option<crate::ssh::SshChannelOpener> {
         (**self).ssh_channels()
@@ -178,6 +190,13 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     }
 }
 
+/// Quanto a [`Inbox`] guarda sem a interface ler: acima disso, [`Inbox::push_wait`] espera
+/// vaga. São algumas centenas de telas cheias, bem mais do que a interface lê num quadro, e o
+/// bastante para a saída nunca esperar quando a tela acompanha. Uma saída sem fim (`yes`, o
+/// `cat` de um log enorme, uma compilação) anda no ritmo em que a tela a mostra, como num
+/// terminal do sistema, em vez de encher a memória e deixar a tela minutos para trás.
+pub const INBOX_LIMIT: usize = 1024 * 1024;
+
 #[derive(Debug, Default)]
 struct Queue {
     bytes: VecDeque<u8>,
@@ -188,14 +207,58 @@ struct Queue {
 #[derive(Debug, Default)]
 struct Shared {
     queue: Mutex<Queue>,
+    /// Avisa quem espera em [`Inbox::push_wait`] que a fila desceu do limite.
+    room: Condvar,
+    /// A ponta da interface foi embora ([`Inbox::detach`]): ninguém mais espera vaga.
+    detached: AtomicBool,
     pending: AtomicBool,
+    /// As threads do sistema que trabalham para a conexão ([`Inbox::mark_thread`]).
+    threads: Mutex<Vec<u32>>,
+}
+
+/// O id da thread atual no sistema (o `tid` do Linux), para olhar o tempo de CPU dela em
+/// `/proc/self/task/<tid>/stat`. `None` fora do Linux, onde a lib não tem como saber sem
+/// `unsafe`.
+pub fn current_thread_id() -> Option<u32> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let link = std::fs::read_link("/proc/thread-self").ok()?;
+    link.file_name()?.to_str()?.parse().ok()
+}
+
+/// A marca de uma thread que trabalha para uma conexão ([`Inbox::mark_thread`]): a thread
+/// sai da lista quando a marca é solta.
+#[must_use = "a thread sai da lista quando a marca é solta"]
+#[derive(Debug)]
+pub struct ThreadMark {
+    shared: Arc<Shared>,
+    id: Option<u32>,
+}
+
+impl Drop for ThreadMark {
+    fn drop(&mut self) {
+        if let Some(id) = self.id {
+            let mut threads = self
+                .shared
+                .threads
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some(i) = threads.iter().position(|t| *t == id) {
+                threads.swap_remove(i);
+            }
+        }
+    }
 }
 
 /// Fila de bytes que chegam, de uma thread de leitura para a interface. Clonar dá outra ponta
 /// da mesma fila.
 ///
 /// [`Inbox::push`] e [`Inbox::close`] acordam a interface
-/// ([`tomni_ui_core::wake`]): o terminal lê no frame seguinte.
+/// ([`tomni_ui_core::wake`]): o terminal lê no frame seguinte. Uma thread que lê de um
+/// programa ou da rede usa [`Inbox::push_wait`], que espera a interface ler quando a fila passa
+/// de [`INBOX_LIMIT`]; quem não pode esperar (a thread da interface, um laço assíncrono) usa
+/// [`Inbox::push`] e, se for o caso, para de ler enquanto [`Inbox::has_room`] for falso.
 #[derive(Clone, Debug, Default)]
 pub struct Inbox {
     shared: Arc<Shared>,
@@ -214,7 +277,8 @@ impl Inbox {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Põe bytes na fila, de qualquer thread.
+    /// Põe bytes na fila, de qualquer thread, sem esperar: passa do [`INBOX_LIMIT`] se for
+    /// preciso.
     pub fn push(&self, bytes: &[u8]) {
         if bytes.is_empty() {
             return;
@@ -222,6 +286,48 @@ impl Inbox {
         self.queue().bytes.extend(bytes);
         self.shared.pending.store(true, Ordering::Release);
         tomni_ui_core::wake();
+    }
+
+    /// Põe bytes na fila e, com ela acima do [`INBOX_LIMIT`], espera antes a interface ler
+    /// (ou a ponta dela ir embora, [`Inbox::detach`]). É para a thread que lê de um programa
+    /// ou da rede: parada aqui, ela deixa de ler, e quem escreve espera, como num terminal do
+    /// sistema. Nunca chame da thread da interface.
+    pub fn push_wait(&self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        let mut queue = self.queue();
+        while queue.bytes.len() >= INBOX_LIMIT && !self.shared.detached.load(Ordering::Acquire) {
+            queue = self
+                .shared
+                .room
+                .wait(queue)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        queue.bytes.extend(bytes);
+        drop(queue);
+        self.shared.pending.store(true, Ordering::Release);
+        tomni_ui_core::wake();
+    }
+
+    /// Quantos bytes esperam na fila (para os testes).
+    #[cfg(test)]
+    pub(crate) fn queued(&self) -> usize {
+        self.queue().bytes.len()
+    }
+
+    /// Se a fila está abaixo do [`INBOX_LIMIT`]: um laço que não pode esperar
+    /// ([`Inbox::push`]) só lê mais da conexão quando há vaga.
+    pub fn has_room(&self) -> bool {
+        self.queue().bytes.len() < INBOX_LIMIT || self.shared.detached.load(Ordering::Acquire)
+    }
+
+    /// A ponta da interface foi embora (a conexão foi solta): quem espera em
+    /// [`Inbox::push_wait`] segue sem esperar, agora e depois.
+    pub fn detach(&self) {
+        let _queue = self.queue();
+        self.shared.detached.store(true, Ordering::Release);
+        self.shared.room.notify_all();
     }
 
     /// Fecha a fila, com o motivo se foi um erro. Os bytes já postos continuam para ler.
@@ -233,6 +339,33 @@ impl Inbox {
         drop(queue);
         self.shared.pending.store(true, Ordering::Release);
         tomni_ui_core::wake();
+    }
+
+    /// Põe a thread atual na lista das que trabalham para esta conexão (ler, decifrar,
+    /// escrever), até a marca ser solta. O app soma o tempo de CPU delas para saber o peso de
+    /// cada aba ([`Session::threads`](crate::Session::threads)). Fora do Linux, não marca nada.
+    pub fn mark_thread(&self) -> ThreadMark {
+        let id = current_thread_id();
+        if let Some(id) = id {
+            self.shared
+                .threads
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(id);
+        }
+        ThreadMark {
+            shared: Arc::clone(&self.shared),
+            id,
+        }
+    }
+
+    /// Os ids, no sistema, das threads marcadas com [`Inbox::mark_thread`] que ainda rodam.
+    pub fn threads(&self) -> Vec<u32> {
+        self.shared
+            .threads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Abre a fila de novo depois de fechada, para a mesma conexão ser refeita (o
@@ -252,6 +385,9 @@ impl Inbox {
         let mut queue = self.queue();
         let n = max.min(queue.bytes.len());
         buf.extend(queue.bytes.drain(..n));
+        if queue.bytes.len() < INBOX_LIMIT {
+            self.shared.room.notify_all();
+        }
         let empty = queue.bytes.is_empty();
         if empty {
             self.shared.pending.store(false, Ordering::Release);
@@ -459,6 +595,74 @@ mod tests {
         assert_eq!(inbox.read(&mut buf, 4), Status::Closed(Some("fim".into())));
         assert_eq!(buf, b"abcdef");
         assert!(!inbox.pending());
+    }
+
+    #[test]
+    fn a_marca_poe_e_tira_a_thread_da_lista() {
+        let inbox = Inbox::new();
+        assert!(inbox.threads().is_empty());
+        let (pronta, marcada) = std::sync::mpsc::channel();
+        let (soltar, solta) = std::sync::mpsc::channel::<()>();
+        let fila = inbox.clone();
+        let thread = std::thread::spawn(move || {
+            let _mark = fila.mark_thread();
+            pronta.send(current_thread_id()).unwrap();
+            solta.recv().unwrap();
+        });
+        let id = marcada.recv().unwrap();
+        if cfg!(target_os = "linux") {
+            let id = id.expect("o Linux dá o tid");
+            assert_eq!(inbox.threads(), vec![id]);
+            assert_ne!(Some(id), current_thread_id());
+        } else {
+            assert!(inbox.threads().is_empty());
+        }
+        soltar.send(()).unwrap();
+        thread.join().unwrap();
+        assert!(inbox.threads().is_empty());
+    }
+
+    #[test]
+    fn push_wait_espera_vaga_e_segue_depois_da_leitura() {
+        let inbox = Inbox::new();
+        inbox.push(&vec![b'a'; INBOX_LIMIT]);
+        assert_eq!(inbox.queued(), INBOX_LIMIT);
+        assert!(!inbox.has_room());
+        let (feito, terminou) = std::sync::mpsc::channel();
+        let fila = inbox.clone();
+        let thread = std::thread::spawn(move || {
+            fila.push_wait(b"depois");
+            feito.send(()).unwrap();
+        });
+        assert!(
+            terminou
+                .recv_timeout(std::time::Duration::from_millis(200))
+                .is_err(),
+            "com a fila cheia, push_wait espera"
+        );
+        let mut buf = Vec::new();
+        inbox.read(&mut buf, INBOX_LIMIT);
+        terminou
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("a leitura abre vaga");
+        thread.join().unwrap();
+        assert!(inbox.has_room());
+        buf.clear();
+        inbox.read(&mut buf, 100);
+        assert_eq!(buf, b"depois");
+    }
+
+    #[test]
+    fn detach_solta_quem_espera_vaga() {
+        let inbox = Inbox::new();
+        inbox.push(&vec![b'a'; INBOX_LIMIT]);
+        let fila = inbox.clone();
+        let thread = std::thread::spawn(move || fila.push_wait(b"fim"));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        inbox.detach();
+        thread.join().unwrap();
+        assert!(inbox.has_room(), "solta, a fila não segura mais ninguém");
+        inbox.push_wait(b"sem esperar");
     }
 
     #[test]

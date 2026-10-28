@@ -373,6 +373,14 @@ impl Nebula {
         espera.await.unwrap_or_default()
     }
 
+    /// Pede para parar sem esperar e sem largar o motor: serve quando há outros donos do
+    /// `Arc` (as conexões abertas por ele) e o motor não pode mais ficar ligado. Avisa os
+    /// pares como o [`Nebula::stop`]; depois disso, o estado vai a `Stopped`.
+    pub fn close(&self) {
+        let (ack, _) = oneshot::channel();
+        let _ = self.commands.send(Command::Stop(ack));
+    }
+
     /// Fecha as conexões, avisa os pares (`CloseTunnel`) e para.
     pub async fn stop(mut self) {
         if let Some(ponte) = self.bridge.take() {

@@ -9,8 +9,52 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 - `request_focus_in(window, id)`: a focus request from an effect, which runs in any window's
   frame, with the window that answers first.
+- `tomni_ui_net::HttpProxyServer`: a local HTTP proxy on `127.0.0.1` that carries each request
+  (`CONNECT` or plain HTTP in absolute form) through a dial function from the app, with the
+  unresolved name. Useful to open a browser that goes out through another network.
+- `AreaChart`, `Sparkline` and `LevelMeter`: the Task Manager's area chart (the whole series,
+  `.max`, `.capacity` of 60 points), its small version and the meter of squares from light
+  yellow to dark red, which becomes a button with `.on_click`. `TestApp::value` reads the meter's
+  level and the chart's newest point. Example `desempenho`.
+- `DataGrid`: `DataGridRow::heat(0..=1)` colors the cell's background by weight, and
+  `CellValue::Sparkline` draws a small series in place of the text.
+- Terminal: `Session::sent()`, `Session::busy()` (the time spent reading, parsing and painting)
+  and `Session::threads()` (the connection's threads, to measure each tab's CPU; on Linux).
+- `tomni_ui_win32::process_usage(pid)`: a process's CPU time and memory on Windows.
+- The `Symbol::DataArea` icon.
+
+- `App::stall_log(path)` (and `WindowOptions::stall_log`): the stall log. A watchdog thread
+  writes when the UI is stuck for more than 2 s in a stage (the event, the frame, layout, the
+  terminals, the window texture...), with the thread state, load, memory and the busiest threads
+  (on Linux), and the time per stage for each heavy minute. `tomni_ui::stages::stage("name")`
+  marks an app stage.
+- Terminal: `INBOX_LIMIT`, `Inbox::push_wait`, `Inbox::has_room` and `Inbox::detach`.
+- `close(&self)` on the VPN engines (`Nebula`, `WireGuard`, `Tailscale`, `ZeroTier` and
+  `OpenVpn`): asks it to stop without waiting and without consuming the engine, for when it sits in
+  an `Arc` shared with the connections.
+
+### Changed
+
+- An empty `TitleBar::subtitle` disappears and leaves no space, like WinUI's `Collapsed`: a
+  closure can show the subtitle only when it makes sense.
+- `TestApp` passes the `Form` title to the window on every frame, like the runner: a title that
+  changes shows up in `WindowHandle::title`, the main window's included.
+- A `MenuFlyout` taller than the window takes the window's height and scrolls, as in WinUI,
+  instead of cutting off the bottom items.
 
 ### Fixed
+
+- A terminal with endless output (`yes`, a huge log) made memory grow without bound and the
+  window stop responding. Each connection's queue now holds 1 MiB: the program waits, as in a
+  system terminal, and Ctrl+C still gets through; over SSH, the other channels of the same
+  connection (SFTP, `exec`, tunnels) keep moving. A `wake` from another thread no longer floods
+  the window's event queue.
+
+- Tray on Cinnamon and MATE: the Ayatana host ignores `IconPixmap` and showed an empty slot. The
+  icon now also goes as a PNG in `$XDG_RUNTIME_DIR/tomni-ui/`, by path in `IconName`, as Qt does;
+  the file is removed when the icon goes away.
+- The transfer queue honors "Cancel" between partial writes, without waiting for the whole
+  buffer to go out on a slow server.
 
 - With the same screen mounted in two windows, `request_focus`, `request_focus_inside`,
   `start_bring_into_view` and `TextEditorController::focus` gave focus to whichever window ran

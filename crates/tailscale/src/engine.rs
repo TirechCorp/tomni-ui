@@ -726,6 +726,14 @@ impl Tailscale {
         resultado
     }
 
+    /// Pede para parar sem esperar e sem largar o motor: serve quando há outros donos do
+    /// `Arc` (as conexões abertas por ele) e o motor não pode mais ficar ligado. Depois disso,
+    /// o estado vai a `Stopped`, como no [`Tailscale::stop`].
+    pub fn close(&self) {
+        let (ack, _) = oneshot::channel();
+        let _ = self.commands.send(Command::Stop(ack));
+    }
+
     /// Fecha as conexões e para. `espera` limita quanto tempo se espera o motor acabar.
     pub async fn stop(mut self, espera: Duration) {
         let (ack, pronto) = oneshot::channel();

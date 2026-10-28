@@ -133,6 +133,7 @@ bug
 wifi_1 Wifi
 battery_10 Battery
 flash
+data_area
 
 ## Mídia
 play

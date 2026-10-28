@@ -330,7 +330,8 @@ impl TitleBar {
         }
     }
 
-    /// Subtítulo, depois do título, na cor secundária (uma versão, "Prévia").
+    /// Subtítulo, depois do título, na cor secundária (uma versão, "Prévia"). Vazio, ele some
+    /// e não deixa espaço: uma closure pode mostrá-lo só quando faz sentido.
     pub fn subtitle<M>(mut self, subtitle: impl IntoProp<String, M>) -> Self {
         self.subtitle = Some(subtitle.into_prop());
         self
@@ -502,6 +503,10 @@ impl Widget for TitleBar {
             let mut part = Part::new(state);
             part.foreground = Some(Token::TextFillColorSecondary);
             part.flex.padding = Insets::new(0.0, 16.0, 0.0, 0.0);
+            // Vazio, o subtítulo sai do layout, como o `Collapsed` do WinUI: o recuo de 16 px
+            // não sobra antes do conteúdo.
+            let shown = subtitle.clone();
+            part.common.visible = Some((move || !shown.get().is_empty()).into_prop());
             part.children.push(Box::new(
                 Text::new(move || subtitle.get()).caption().max_lines(1),
             ));

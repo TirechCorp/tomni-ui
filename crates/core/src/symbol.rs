@@ -262,6 +262,8 @@ pub enum Symbol {
     Battery,
     /// `flash_regular`.
     Flash,
+    /// `data_area_regular`.
+    DataArea,
     // Mídia
     /// `play_regular`.
     Play,
@@ -418,7 +420,7 @@ pub enum Symbol {
 
 impl Symbol {
     /// Todos os ícones, na ordem do guia.
-    pub const ALL: [Symbol; 197] = [
+    pub const ALL: [Symbol; 198] = [
         Symbol::Home,
         Symbol::ArrowLeft,
         Symbol::ArrowRight,
@@ -543,6 +545,7 @@ impl Symbol {
         Symbol::Wifi,
         Symbol::Battery,
         Symbol::Flash,
+        Symbol::DataArea,
         Symbol::Play,
         Symbol::Pause,
         Symbol::Stop,
@@ -745,6 +748,7 @@ impl Symbol {
             Symbol::Wifi => "Wifi",
             Symbol::Battery => "Battery",
             Symbol::Flash => "Flash",
+            Symbol::DataArea => "DataArea",
             Symbol::Play => "Play",
             Symbol::Pause => "Pause",
             Symbol::Stop => "Stop",
@@ -948,6 +952,7 @@ impl Symbol {
             Symbol::Wifi => "wifi_1_regular",
             Symbol::Battery => "battery_10_regular",
             Symbol::Flash => "flash_regular",
+            Symbol::DataArea => "data_area_regular",
             Symbol::Play => "play_regular",
             Symbol::Pause => "pause_regular",
             Symbol::Stop => "stop_regular",

@@ -39,6 +39,9 @@ mod content_dialog;
 #[path = "../../tomni-ui/examples/data_grid.rs"]
 mod data_grid;
 #[allow(dead_code, reason = "o `main` do exemplo não é usado no teste")]
+#[path = "../../tomni-ui/examples/desempenho.rs"]
+mod desempenho;
+#[allow(dead_code, reason = "o `main` do exemplo não é usado no teste")]
 #[path = "../../tomni-ui/examples/dock.rs"]
 mod dock;
 #[allow(dead_code, reason = "o `main` do exemplo não é usado no teste")]
@@ -163,7 +166,7 @@ mod uniform_grid;
 mod webview;
 
 /// Os exemplos testados abaixo, cada um com um `#[test]` de mesmo nome.
-const EXEMPLOS: [&str; 50] = [
+const EXEMPLOS: [&str; 51] = [
     "auto_suggest_box",
     "bandeja",
     "border",
@@ -173,6 +176,7 @@ const EXEMPLOS: [&str; 50] = [
     "combo_box",
     "content_dialog",
     "data_grid",
+    "desempenho",
     "dock",
     "edit",
     "expander",
@@ -904,6 +908,50 @@ fn progress() {
         assert_eq!(app.value("barra"), 1.0);
         assert_eq!(app.text("resumo"), "100% enviado");
         assert!(!app.enabled("avancar"));
+        app.assert_lint();
+    });
+}
+
+#[test]
+fn desempenho() {
+    nos_dois_temas(desempenho::painel, |app| {
+        app.assert_lint();
+        assert_eq!(app.value("cpu"), 35.0);
+        assert_eq!(app.value("medidor"), 0.35);
+        let arvore = app.tree();
+        let tipo = |id: &str| arvore.find(id).map(|n| n.kind);
+        assert_eq!(tipo("cpu"), Some("area_chart"));
+        assert_eq!(tipo("spark-cpu"), Some("sparkline"));
+        assert_eq!(tipo("medidor"), Some("level_meter"));
+        // A amostra nova entra na borda direita dos gráficos e no medidor.
+        app.click("amostrar");
+        assert_eq!(app.value("cpu"), 12.0);
+        assert_eq!(app.value("spark-cpu"), 12.0);
+        app.click("amostrar")
+            .click("amostrar")
+            .click("amostrar")
+            .click("amostrar");
+        assert_eq!(app.value("medidor"), 0.92);
+        // A tabela ordena pela CPU, do maior ao menor.
+        let tabela = app.grid("programas");
+        assert_eq!(
+            tabela.keys(),
+            ["compilador", "navegador", "terminal", "ocioso"]
+        );
+        assert_eq!(tabela.rows[0].cells[1], "55%");
+        // A coluna do histórico ordena pela média da minissérie.
+        let divisor = app.grid_divider("programas", 2);
+        let largura = app.grid("programas").columns[2].width;
+        app.click_at(
+            tomni_ui::kurbo::Point::new(divisor.x - largura / 2.0, divisor.y),
+            1,
+        );
+        assert_eq!(app.grid("programas").keys()[0], "ocioso");
+        // O clique no medidor esconde e mostra os gráficos.
+        app.click("medidor");
+        assert!(app.tree().find("cpu").is_none());
+        app.click("medidor");
+        assert!(app.tree().find("cpu").is_some());
         app.assert_lint();
     });
 }

@@ -721,6 +721,11 @@ impl Ui {
                 node.state = Some(state_name(visual.state));
             }
             Look::ProgressBar(visual) | Look::ProgressRing(visual) => node.value = visual.value,
+            Look::Chart(visual) => node.value = visual.values.last().copied(),
+            Look::LevelMeter(visual) => {
+                node.value = Some(visual.value);
+                node.state = Some(state_name(visual.state));
+            }
             Look::Expander(visual) => {
                 node.label = text;
                 node.open = Some(visual.open);

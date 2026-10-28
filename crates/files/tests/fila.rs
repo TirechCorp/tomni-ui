@@ -333,6 +333,36 @@ fn cancelar_deixa_o_parcial_e_retomar_termina() {
 }
 
 #[test]
+fn cancelar_no_meio_de_um_buffer_nao_espera_ele_acabar() {
+    // O arquivo cabe num buffer só, e o servidor grava 10 bytes a cada 25 ms: inteiro, levaria
+    // 10 s.
+    let pasta = Pasta::nova("cancelar-buffer");
+    pasta.escrever("p.bin", &dados(4000));
+    let mem = MemFs::new();
+    mem.dir("/srv");
+    mem.set_chunk(10);
+    mem.set_delay(Duration::from_millis(25));
+    let fila = Transfers::new(1);
+    let id = fila.add(
+        (Endpoint::Local, pasta.texto("p.bin")),
+        (remoto(&mem), "/srv/p.bin".to_owned()),
+        Conflict::Overwrite,
+    );
+    esperar_ate(&fila, id, |i| i.state == TransferState::Running);
+    let inicio = Instant::now();
+    fila.cancel(id);
+    let info = esperar_ate(&fila, id, |i| i.state.is_finished());
+    assert_eq!(info.state, TransferState::Cancelled);
+    assert!(
+        inicio.elapsed() < Duration::from_secs(2),
+        "o cancelar esperou o buffer: {:?}",
+        inicio.elapsed()
+    );
+    let parcial = mem.contents("/srv/p.bin").unwrap_or_default();
+    assert!(parcial.len() < 4000, "não gravou tudo");
+}
+
+#[test]
 fn pausar_segura_o_que_anda_e_o_que_espera() {
     let pasta = Pasta::nova("pausar");
     pasta.escrever("p.bin", &dados(1024 * 1024));

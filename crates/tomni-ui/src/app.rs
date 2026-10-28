@@ -150,6 +150,15 @@ impl App {
         self
     }
 
+    /// Liga o registro de travamentos, gravado em `path`: uma thread vigia escreve quando a
+    /// interface fica parada mais de 2 s numa etapa (um evento, o quadro, o layout, os
+    /// terminais, a textura da janela) e, a cada minuto em que ela pesou, o tempo por etapa.
+    /// Ver [`WindowOptions::stall_log`](tomni_ui_platform::WindowOptions::stall_log).
+    pub fn stall_log(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.options.stall_log = Some(path.into());
+        self
+    }
+
     /// `AndroidApp` recebido em `android_main`. Obrigatório no Android.
     #[cfg(target_os = "android")]
     pub fn android(mut self, app: tomni_ui_platform::AndroidApp) -> Self {
@@ -462,6 +471,16 @@ mod tests {
         assert_eq!(
             app.options.render_guard.as_deref(),
             Some(std::path::Path::new("/tmp/guarda.txt"))
+        );
+    }
+
+    #[test]
+    fn o_app_passa_o_registro_de_travamentos_ao_runner() {
+        assert!(App::new(tela).options.stall_log.is_none());
+        let app = App::new(tela).stall_log("/tmp/travamentos.log");
+        assert_eq!(
+            app.options.stall_log.as_deref(),
+            Some(std::path::Path::new("/tmp/travamentos.log"))
         );
     }
 

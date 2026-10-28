@@ -162,6 +162,7 @@ fn start(builder: &TelnetBuilder, inbox: &Inbox) -> (Sender<Command>, Arc<Atomic
     let spawned = thread::Builder::new()
         .name("tomni-ui-telnet".into())
         .spawn(move || {
+            let _mark = thread_inbox.mark_thread();
             run(
                 &builder,
                 &receiver,
@@ -187,6 +188,8 @@ fn ready(connecting: &AtomicBool) {
 
 impl Drop for Telnet {
     fn drop(&mut self) {
+        // A thread de leitura parada esperando vaga na fila segue e acaba com a conexão.
+        self.inbox.detach();
         let _ = self.commands.send(Command::Close);
     }
 }
@@ -208,6 +211,10 @@ impl Transport for Telnet {
 
     fn pending(&self) -> bool {
         self.inbox.pending()
+    }
+
+    fn threads(&self) -> Vec<u32> {
+        self.inbox.threads()
     }
 
     fn connecting(&self) -> bool {
@@ -262,7 +269,10 @@ fn run(
     let (read_inbox, read_replies) = (inbox.clone(), replies.clone());
     if let Err(error) = thread::Builder::new()
         .name("tomni-ui-telnet-leitura".into())
-        .spawn(move || read_loop(reader, &read_inbox, &read_replies))
+        .spawn(move || {
+            let _mark = read_inbox.mark_thread();
+            read_loop(reader, &read_inbox, &read_replies);
+        })
     {
         return fail(&error);
     }
@@ -298,7 +308,7 @@ fn read_loop(mut reader: TcpStream, inbox: &Inbox, replies: &Sender<Command>) {
             Ok(0) => return inbox.close(None),
             Ok(n) => {
                 decoder.decode(&buf[..n], &mut data, &mut events);
-                inbox.push(&data);
+                inbox.push_wait(&data);
                 data.clear();
                 for event in events.drain(..) {
                     let _ = replies.send(Command::Received(event));

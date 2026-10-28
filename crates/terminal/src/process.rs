@@ -166,7 +166,9 @@ impl ProcessBuilder {
 
         let (status_tx, status_rx) = mpsc::channel();
         let wait_master = Arc::clone(&process.master);
+        let wait_inbox = process.inbox.clone();
         spawn("tomni-ui-pty-espera", move || {
+            let _mark = wait_inbox.mark_thread();
             let status = child.wait();
             // O ConPTY só termina a leitura quando o pseudoterminal fecha.
             if cfg!(windows) {
@@ -179,10 +181,12 @@ impl ProcessBuilder {
         })?;
         let read_inbox = process.inbox.clone();
         spawn("tomni-ui-pty-leitura", move || {
+            let _mark = read_inbox.mark_thread();
             read_loop(reader, &read_inbox, &status_rx);
         })?;
         let write_inbox = process.inbox.clone();
         spawn("tomni-ui-pty-escrita", move || {
+            let _mark = write_inbox.mark_thread();
             write_loop(writer, &commands, &write_inbox);
         })?;
         Ok(())
@@ -225,6 +229,8 @@ impl Drop for Process {
         if let Some(killer) = &mut self.killer {
             let _ = killer.kill();
         }
+        // A thread de leitura parada esperando vaga na fila segue e lê o fim do processo.
+        self.inbox.detach();
         let _ = self.commands.send(Command::Close);
     }
 }
@@ -287,6 +293,10 @@ impl Transport for Process {
     fn process_id(&self) -> Option<u32> {
         self.pid
     }
+
+    fn threads(&self) -> Vec<u32> {
+        self.inbox.threads()
+    }
 }
 
 /// Lê a saída até o fim (no Linux, o fim chega como `EIO` quando o processo sai) e fecha com
@@ -300,7 +310,7 @@ fn read_loop(
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
-            Ok(n) => inbox.push(&buf[..n]),
+            Ok(n) => inbox.push_wait(&buf[..n]),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(_) => break,
         }
@@ -371,6 +381,49 @@ mod tests {
         let (texto, status) = ler_ate(&mut shell, "olá-2\r\n");
         assert_eq!(status, Status::Open, "{texto}");
         assert!(texto.contains("olá-2\r\n"), "{texto:?}");
+    }
+
+    #[test]
+    fn saida_sem_fim_nao_passa_do_limite_da_fila_e_o_ctrl_c_chega() {
+        let mut shell = sh();
+        shell.write(b"yes linha-de-teste\r").unwrap();
+        thread::sleep(Duration::from_millis(500));
+        let fila = shell.inbox.queued();
+        assert!(fila >= crate::INBOX_LIMIT / 2, "o yes enche a fila: {fila}");
+        assert!(
+            fila < crate::INBOX_LIMIT + 64 * 1024,
+            "e para no limite: {fila}"
+        );
+        shell.write(b"\x03echo fim-$((2+3))\r").unwrap();
+        let limite = Instant::now() + Duration::from_secs(20);
+        let mut lido = Vec::new();
+        loop {
+            // Guarda só o fim do que já leu, para achar o "fim-5" partido entre duas leituras.
+            lido.drain(..lido.len().saturating_sub(8));
+            shell.read(&mut lido, usize::MAX);
+            if lido.windows(5).any(|w| w == b"fim-5") {
+                break;
+            }
+            assert!(Instant::now() < limite, "o Ctrl+C não parou o yes");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn as_threads_da_conexao_aparecem() {
+        let mut shell = sh();
+        shell.write(b"echo pronto\r").unwrap();
+        ler_ate(&mut shell, "pronto");
+        let threads = shell.threads();
+        if cfg!(target_os = "linux") {
+            // Espera, leitura e escrita, todas no próprio processo.
+            assert_eq!(threads.len(), 3, "{threads:?}");
+            for id in threads {
+                assert!(std::path::Path::new(&format!("/proc/self/task/{id}")).exists());
+            }
+        } else {
+            assert!(threads.is_empty());
+        }
     }
 
     #[test]
