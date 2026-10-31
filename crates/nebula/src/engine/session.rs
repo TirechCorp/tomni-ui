@@ -5,7 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 
 use tokio::time::Instant;
 
-use super::{Cached, Engine, Host, Key, MAX_CACHED_PACKETS, Pending, now_nanos};
+use super::{Cached, Engine, Host, Key, MAX_CACHED_PACKETS, Pending, Via, now_nanos};
 use crate::handshake::{Completed, Machine};
 use crate::header::{self, Header, MessageType};
 use crate::tunnel::Tunnel;
@@ -30,7 +30,8 @@ impl<U: Underlay> Engine<U> {
             let mut bytes = [0u8; 4];
             let _ = getrandom::fill(&mut bytes);
             escolhido = u32::from_be_bytes(bytes).max(1);
-            if !self.hosts.contains_key(&escolhido)
+            if escolhido != 0
+                && !self.hosts.contains_key(&escolhido)
                 && !self.pending_by_index.contains_key(&escolhido)
             {
                 break;
@@ -131,6 +132,7 @@ impl<U: Underlay> Engine<U> {
         // Com pouca pista, pergunta de novo aos lighthouses na quinta tentativa.
         let perguntar = contador == 5 && candidatos.len() <= 1 && !self.lighthouses.contains(&vpn);
         self.send_stage0(vpn, &candidatos);
+        self.start_relays(vpn);
         if perguntar {
             self.query_lighthouses(vpn);
         }
@@ -209,19 +211,19 @@ impl<U: Underlay> Engine<U> {
     }
 
     /// Um pacote do tipo "aperto de mão".
-    pub(super) fn on_handshake(&mut self, pacote: &[u8], de: SocketAddr, h: Header) {
+    pub(super) fn on_handshake(&mut self, pacote: &[u8], via: Via, h: Header) {
         if h.subtype != header::HANDSHAKE_IX_PSK0 {
             return;
         }
         if h.counter == 1 {
-            self.begin_handshake(pacote, de, h);
+            self.begin_handshake(pacote, via, h);
         } else {
-            self.continue_handshake(pacote, de, h);
+            self.continue_handshake(pacote, via, h);
         }
     }
 
     /// Quem responde: chegou o primeiro pacote de um par.
-    fn begin_handshake(&mut self, pacote: &[u8], de: SocketAddr, h: Header) {
+    fn begin_handshake(&mut self, pacote: &[u8], via: Via, h: Header) {
         if h.remote_index != 0 {
             return;
         }
@@ -233,20 +235,20 @@ impl<U: Underlay> Engine<U> {
         let (Some(resposta), Some(pronto)) = (passo.reply, passo.done) else {
             return;
         };
-        match self.install(pronto, de, Some(pacote.to_vec()), Some(resposta.clone())) {
+        match self.install(pronto, via, Some(pacote.to_vec()), Some(resposta.clone())) {
             Ok(indice) => {
-                self.raw_send(&resposta, de);
+                self.reply(via, &resposta);
                 if let Some(vpn) = self.hosts.get(&indice).map(|h| h.vpn) {
                     self.tunnel_opened(vpn, indice);
                 }
             }
-            Err(Rejected::AlreadySeen(antiga)) => self.raw_send(&antiga, de),
+            Err(Rejected::AlreadySeen(antiga)) => self.reply(via, &antiga),
             Err(Rejected::TooOld | Rejected::Other) => {}
         }
     }
 
     /// Quem inicia: chegou a resposta.
-    fn continue_handshake(&mut self, pacote: &[u8], de: SocketAddr, h: Header) {
+    fn continue_handshake(&mut self, pacote: &[u8], via: Via, h: Header) {
         let Some(&vpn) = self.pending_by_index.get(&h.remote_index) else {
             return;
         };
@@ -267,7 +269,9 @@ impl<U: Underlay> Engine<U> {
             }
             Err(erro) => {
                 p.last_error = Some(erro.reason);
-                self.remotes.entry(vpn).or_default().block(de);
+                if let Via::Udp(de) = via {
+                    self.remotes.entry(vpn).or_default().block(de);
+                }
                 self.restart_pending(vpn);
                 return;
             }
@@ -284,15 +288,17 @@ impl<U: Underlay> Engine<U> {
         if !tem_endereco {
             if let Some(p) = self.pending.get_mut(&vpn) {
                 p.last_error = Some(format!(
-                    "quem respondeu em {de} é {}, e não {vpn}",
+                    "quem respondeu em {via} é {}, e não {vpn}",
                     pronto.remote_cert.name()
                 ));
             }
-            self.remotes.entry(vpn).or_default().block(de);
+            if let Via::Udp(de) = via {
+                self.remotes.entry(vpn).or_default().block(de);
+            }
             self.restart_pending(vpn);
             return;
         }
-        match self.install(pronto, de, None, None) {
+        match self.install(pronto, via, None, None) {
             Ok(indice) => self.tunnel_opened(vpn, indice),
             Err(_) => {
                 // Já há um túnel melhor: os pacotes guardados vão por ele.
@@ -310,7 +316,7 @@ impl<U: Underlay> Engine<U> {
     fn install(
         &mut self,
         pronto: Completed,
-        de: SocketAddr,
+        via: Via,
         stage0: Option<Vec<u8>>,
         stage2: Option<Vec<u8>>,
     ) -> Result<u32, Rejected> {
@@ -371,12 +377,21 @@ impl<U: Underlay> Engine<U> {
             stage0,
             stage2,
             rehandshaked: false,
+            relay_for: std::collections::HashMap::new(),
+            relays: Vec::new(),
         };
         self.hosts.insert(indice, host);
         for addr in enderecos {
             self.primary.insert(addr, indice);
         }
-        self.set_remote(indice, de);
+        match via {
+            Via::Udp(de) => self.set_remote(indice, de),
+            Via::Relay { through, .. } => {
+                if let Some(h) = self.hosts.get_mut(&indice) {
+                    h.relays.push(through);
+                }
+            }
+        }
         self.timers.add(
             agora + self.cfg.connection_alive_interval,
             Key::Traffic(indice),
@@ -462,6 +477,8 @@ impl<U: Underlay> Engine<U> {
                 self.primary.entry(*addr).or_insert(outro);
             }
         }
+        let relay_for = host.relay_for.into_values().collect();
+        self.relays_after_delete(host.vpn, relay_for, &host.relays, outro);
         self.recompute_state();
     }
 

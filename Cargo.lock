@@ -6374,6 +6374,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tomni-ui-macos"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "tomni-ui-markdown"
 version = "0.1.0"
 dependencies = [

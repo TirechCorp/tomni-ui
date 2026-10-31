@@ -1,0 +1,36 @@
+# O lighthouse oficial que também é relay (certificado lighthouse-v1), do teste real dos relays. Chaves só
+# de teste.
+pki:
+  ca: /fixtures/ca-25519.crt
+  cert: /fixtures/lighthouse-v1.crt
+  key: /fixtures/lighthouse-v1.key
+
+lighthouse:
+  am_lighthouse: true
+
+relay:
+  am_relay: true
+
+listen:
+  host: 0.0.0.0
+  port: 4242
+
+punchy:
+  punch: true
+
+# O relay só passa pacotes adiante: dispensa a placa virtual.
+tun:
+  disabled: true
+
+logging:
+  level: info
+
+firewall:
+  outbound:
+    - port: any
+      proto: any
+      host: any
+  inbound:
+    - port: any
+      proto: any
+      host: any

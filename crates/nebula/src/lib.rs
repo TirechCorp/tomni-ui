@@ -4,8 +4,15 @@
 //! O [Nebula](https://github.com/slackhq/nebula) (da Slack, licença MIT) é uma rede em malha
 //! cifrada: cada nó tem um certificado assinado por uma CA, os nós se acham por um ou mais
 //! lighthouses e conversam direto, furando o NAT. Aqui o protocolo é reimplementado em Rust (os
-//! certificados v1 e v2, o aperto de mão Noise IX, o túnel, o lighthouse e o punch), compatível
-//! com o `nebula` oficial, e fala com a pilha TCP/IP em software de [`tomni_ui_netstack`].
+//! certificados v1 e v2, o aperto de mão Noise IX, o túnel, o lighthouse, o punch e os relays),
+//! compatível com o `nebula` oficial, e fala com a pilha TCP/IP em software de
+//! [`tomni_ui_netstack`].
+//!
+//! Quando o punch não passa (os dois nós atrás de CGNAT, comum nas operadoras), o tráfego vai por
+//! um relay: o nó lista em `relay.relays` os nós com `relay.am_relay` pelos quais aceita ser
+//! alcançado, avisa o lighthouse, e quem quer chegar a ele pede o relay e manda o aperto de mão
+//! por dentro. O túnel continua cifrado de ponta a ponta; o relay só passa adiante. O app é só
+//! cliente (`relay.use_relays`, ligado por padrão): não faz papel de relay.
 //!
 //! A [`Nebula`] devolve um [`Proxy`] SOCKS5 que só os clientes do próprio
 //! app usam (SSH, SFTP, Telnet, FTP, S3, rclone): a porta fica em `127.0.0.1`, com porta e
@@ -29,6 +36,7 @@
 
 mod cert;
 mod config;
+mod control;
 mod der;
 mod engine;
 mod handshake;
@@ -127,6 +135,7 @@ pub struct NebulaBuilder {
     config: Config,
     notifier: Option<Arc<dyn Fn(State) + Send + Sync>>,
     am_lighthouse: bool,
+    am_relay: bool,
 }
 
 impl NebulaBuilder {
@@ -136,6 +145,7 @@ impl NebulaBuilder {
             config,
             notifier: None,
             am_lighthouse: false,
+            am_relay: false,
         }
     }
 
@@ -152,6 +162,16 @@ impl NebulaBuilder {
     #[must_use]
     pub fn as_lighthouse(mut self) -> NebulaBuilder {
         self.am_lighthouse = true;
+        self
+    }
+
+    /// Faz o nó passar os pacotes de um par a outro (`relay.am_relay`), para os nós que não se
+    /// alcançam direto. O app é só cliente (usa os relays da rede); isto existe para os testes
+    /// do motor.
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn as_relay(mut self) -> NebulaBuilder {
+        self.am_relay = true;
         self
     }
 
@@ -232,6 +252,7 @@ impl NebulaBuilder {
             creds: Arc::new(creds),
             under,
             am_lighthouse: self.am_lighthouse,
+            am_relay: self.am_relay,
             notifier: self.notifier,
         })?;
         let tunnel = NebulaTunnel {

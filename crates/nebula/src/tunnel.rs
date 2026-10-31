@@ -2,7 +2,7 @@
 //! anti-repetição de recepção.
 //!
 //! Portado do Nebula (github.com/slackhq/nebula, licença MIT, `connection_state.go`,
-//! `outside.go` e `inside.go`). O cabeçalho de 16 bytes é o dado associado do AEAD: adulterar
+//! `outside.go` e `inside.go`; o pacote de relay, de `SendVia` em `inside.go`). O cabeçalho de 16 bytes é o dado associado do AEAD: adulterar
 //! qualquer campo dele invalida o pacote.
 
 use crate::header::{self, MessageType};
@@ -110,6 +110,47 @@ impl Tunnel {
         }
         Ok(aberto)
     }
+
+    /// O pacote que leva `inner` pelo relay (`MESSAGE_RELAY`): o cabeçalho de fora, o pacote de
+    /// dentro como está (ele já vai cifrado de ponta a ponta) e uma etiqueta que autentica os
+    /// dois, sem cifrar nada. `None` se o contador esgotou.
+    pub(crate) fn seal_relay(&mut self, remote_index: u32, inner: &[u8]) -> Option<Vec<u8>> {
+        if self.exhausted() {
+            return None;
+        }
+        self.counter += 1;
+        let mut pacote = Vec::with_capacity(header::LEN + inner.len() + TAG_LEN);
+        pacote.extend_from_slice(&header::encode(
+            MessageType::Message,
+            header::MESSAGE_RELAY,
+            remote_index,
+            self.counter,
+        ));
+        pacote.extend_from_slice(inner);
+        let etiqueta = self.send.seal(self.counter, &pacote, &[])?;
+        pacote.extend_from_slice(&etiqueta);
+        Some(pacote)
+    }
+
+    /// Confere um pacote de relay recebido: a janela, depois a etiqueta sobre o cabeçalho e o
+    /// pacote de dentro, e só então registra o contador. O pacote de dentro é
+    /// `pacote[header::LEN..pacote.len() - TAG_LEN]`.
+    pub(crate) fn open_relay(&mut self, pacote: &[u8], contador: u64) -> Result<(), DecryptError> {
+        if pacote.len() < header::LEN + TAG_LEN {
+            return Err(DecryptError::Authentication);
+        }
+        if !self.window.check(contador) {
+            return Err(DecryptError::Replay);
+        }
+        let (assinado, etiqueta) = pacote.split_at(pacote.len() - TAG_LEN);
+        self.recv
+            .open(contador, assinado, etiqueta)
+            .ok_or(DecryptError::Authentication)?;
+        if !self.window.update(contador) {
+            return Err(DecryptError::Replay);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -214,5 +255,38 @@ mod tests {
     fn pacote_curto_demais_nao_e_lido() {
         let (_, mut b) = par(Cipher::Aes);
         assert_eq!(b.decrypt(&[0u8; 20], 5), Err(DecryptError::Authentication));
+    }
+
+    #[test]
+    fn o_pacote_de_relay_autentica_sem_cifrar_e_recusa_adulteracao_e_repeticao() {
+        for cifra in [Cipher::Aes, Cipher::ChaChaPoly] {
+            let (mut a, mut b) = par(cifra);
+            let dentro = b"pacote de dentro, ja cifrado de ponta a ponta";
+            let pacote = a.seal_relay(0x0bad_cafe, dentro).unwrap();
+            let h = Header::parse(&pacote).unwrap();
+            assert_eq!(
+                (h.kind, h.subtype, h.remote_index, h.counter),
+                (MessageType::Message, header::MESSAGE_RELAY, 0x0bad_cafe, 3)
+            );
+            assert_eq!(pacote.len(), header::LEN + dentro.len() + TAG_LEN);
+            assert_eq!(&pacote[header::LEN..pacote.len() - TAG_LEN], dentro);
+
+            let mut adulterado = pacote.clone();
+            adulterado[header::LEN] ^= 1;
+            assert_eq!(
+                b.open_relay(&adulterado, h.counter),
+                Err(DecryptError::Authentication)
+            );
+            assert_eq!(b.open_relay(&pacote, h.counter), Ok(()));
+            assert_eq!(b.open_relay(&pacote, h.counter), Err(DecryptError::Replay));
+            assert_eq!(
+                b.open_relay(&pacote[..header::LEN + 3], h.counter + 1),
+                Err(DecryptError::Authentication)
+            );
+            // O contador é o mesmo dos pacotes comuns do túnel.
+            let comum = a.encrypt(MessageType::Message, 0, 1, b"x").unwrap();
+            assert_eq!(Header::parse(&comum).unwrap().counter, 4);
+            assert_eq!(receber(&mut b, &comum).unwrap(), b"x");
+        }
     }
 }

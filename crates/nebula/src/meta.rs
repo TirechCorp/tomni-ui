@@ -77,7 +77,7 @@ pub(crate) struct Meta {
 }
 
 /// O `Addr{Hi, Lo}` do protobuf: o endereço em 16 bytes (o IPv4 vai mapeado em IPv6).
-fn write_addr(escritor: &mut Writer, campo: u32, endereco: IpAddr) {
+pub(crate) fn write_addr(escritor: &mut Writer, campo: u32, endereco: IpAddr) {
     let octetos = match endereco {
         IpAddr::V4(v4) => v4.to_ipv6_mapped().octets(),
         IpAddr::V6(v6) => v6.octets(),
@@ -94,7 +94,7 @@ fn write_addr(escritor: &mut Writer, campo: u32, endereco: IpAddr) {
     escritor.bytes_always(campo, &interno.finish());
 }
 
-fn read_addr(bytes: &[u8]) -> Option<IpAddr> {
+pub(crate) fn read_addr(bytes: &[u8]) -> Option<IpAddr> {
     let (mut hi, mut lo) = (0u64, 0u64);
     for item in Reader::new(bytes) {
         let (campo, valor) = item.ok()?;
@@ -239,7 +239,6 @@ impl Details {
     }
 
     /// Os relays das duas formas, juntos.
-    #[cfg(test)]
     pub(crate) fn all_relays(&self) -> Vec<IpAddr> {
         self.old_relays
             .iter()

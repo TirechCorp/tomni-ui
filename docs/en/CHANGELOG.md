@@ -7,11 +7,24 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Added
 
+- `tomni-ui-nebula`: Nebula relays, compatible with official Nebula (v1 and v2 certificates).
+  With `relay.relays` the node accepts being reached through the listed relays, and with
+  `relay.use_relays` it reaches peers through the relays they announce; this is the path when
+  both sides are behind CGNAT or symmetric NAT. `TunnelInfo::relay` tells which relay the tunnel goes through.
+- `Session::held::<T, _>(|value| ..)`: reads the first value of type `T` hung with `hold`
+  (`None` if there's none or the session was dropped).
 - `request_focus_in(window, id)`: a focus request from an effect, which runs in any window's
   frame, with the window that answers first.
 - `tomni_ui_net::HttpProxyServer`: a local HTTP proxy on `127.0.0.1` that carries each request
   (`CONNECT` or plain HTTP in absolute form) through a dial function from the app, with the
   unresolved name. Useful to open a browser that goes out through another network.
+  The same server speaks SOCKS5 on the same port (`socks_url()` gives the `socks5h://` URL), and
+  `bind(address, …)` picks the port and the address.
+- `tomni_ui_net::PortForward::bind(address, host, port, dial)`: a local port that always carries
+  each connection to the same destination, through the app's dial function (an `-L` tunnel
+  without SSH).
+- Terminal: `Session::hold(value)` keeps a value with the session (a proxy, a tunnel) until
+  `dispose`.
 - `AreaChart`, `Sparkline` and `LevelMeter`: the Task Manager's area chart (the whole series,
   `.max`, `.capacity` of 60 points), its small version and the meter of squares from light
   yellow to dark red, which becomes a button with `.on_click`. `TestApp::value` reads the meter's
@@ -21,6 +34,8 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 - Terminal: `Session::sent()`, `Session::busy()` (the time spent reading, parsing and painting)
   and `Session::threads()` (the connection's threads, to measure each tab's CPU; on Linux).
 - `tomni_ui_win32::process_usage(pid)`: a process's CPU time and memory on Windows.
+- `tomni-ui-macos`, the crate for the macOS calls with no safe API: `process_usage(pid)` (a
+  process's CPU time and memory) and `child_pids(pid)` (its direct children).
 - The `Symbol::DataArea` icon.
 
 - `App::stall_log(path)` (and `WindowOptions::stall_log`): the stall log. A watchdog thread
@@ -44,6 +59,16 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Fixed
 
+- SSH: the password is also sent through `keyboard-interactive` when the server rejects the
+  `password` method and offers that one (the FreeBSD and pfSense sshd, OpenSSH with
+  `PasswordAuthentication no`). A second question after the password (a two-factor code)
+  becomes an error with the question's text.
+- On macOS, "servidor inalcançável" (host unreachable) says where to grant the app Local
+  Network access.
+- The macOS release build printed an unused `mut` warning in `tomni-ui-platform`.
+- Terminal: Backspace at column 0 of a line that continues the one above (autowrap) goes back to
+  the last column of the one above, as PuTTY does. A screen-wide progress bar (`pv` in a pipe
+  with `7z`) no longer moves down a line on every refresh.
 - A terminal with endless output (`yes`, a huge log) made memory grow without bound and the
   window stop responding. Each connection's queue now holds 1 MiB: the program waits, as in a
   system terminal, and Ctrl+C still gets through; over SSH, the other channels of the same

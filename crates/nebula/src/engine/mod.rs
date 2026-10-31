@@ -3,12 +3,13 @@
 //! que a pilha manda, aos comandos e aos temporizadores.
 //!
 //! Portado do comportamento do Nebula (github.com/slackhq/nebula, licença MIT: `outside.go`,
-//! `inside.go`, `handshake_manager.go`, `hostmap.go`, `lighthouse.go`, `connection_manager.go` e
-//! `remote_list.go`). Um estado só numa tarefa dispensa as travas do Go e deixa a ordem dos
+//! `inside.go`, `handshake_manager.go`, `hostmap.go`, `lighthouse.go`, `connection_manager.go`,
+//! `relay_manager.go` e `remote_list.go`). Um estado só numa tarefa dispensa as travas do Go e deixa a ordem dos
 //! eventos previsível, o que os testes com relógio parado aproveitam.
 
 mod data;
 mod lighthouse;
+mod relay;
 mod session;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -74,8 +75,11 @@ pub struct TunnelInfo {
     pub vpn_addr: IpAddr,
     /// O nome no certificado do par.
     pub name: String,
-    /// O endereço UDP por onde o túnel passa agora.
+    /// O endereço UDP por onde o túnel passa agora. `None` quando ele passa por um relay.
     pub remote: Option<SocketAddr>,
+    /// O relay por onde o túnel passa, quando não há caminho direto (os dois lados atrás de
+    /// CGNAT, por exemplo).
+    pub relay: Option<IpAddr>,
     /// Este nó iniciou o túnel.
     pub initiator: bool,
     /// O par é um lighthouse.
@@ -142,6 +146,67 @@ pub(crate) struct Pending {
     pub(crate) sent_any: bool,
 }
 
+/// O papel de um relay num túnel: este nó é uma das pontas, ou passa os pacotes adiante.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RelayKind {
+    /// Este nó é a ponta: o pacote de dentro é para ele.
+    Terminal,
+    /// Este nó é o relay: o pacote segue para o outro par.
+    Forwarding,
+}
+
+/// Em que pé está um relay (`relay_manager.go`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RelayState {
+    /// Pedimos e esperamos a resposta.
+    Requested,
+    /// O par pediu e ainda falta o outro lado responder (só no relay).
+    PeerRequested,
+    /// Passa pacotes.
+    Established,
+    /// O túnel com o outro lado caiu; volta a valer se for pedido de novo.
+    Disestablished,
+}
+
+/// Um relay com `peer`, guardado no túnel com o nó que faz o relay (ou, no relay, no túnel com
+/// cada ponta).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Relay {
+    pub(crate) kind: RelayKind,
+    pub(crate) state: RelayState,
+    /// O índice que o outro lado põe nos pacotes de relay para nós.
+    pub(crate) local_index: u32,
+    /// O índice que pomos nos pacotes de relay para o outro lado.
+    pub(crate) remote_index: u32,
+    /// A outra ponta.
+    pub(crate) peer: IpAddr,
+}
+
+/// Por onde um pacote chegou.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Via {
+    /// Direto pelo UDP.
+    Udp(SocketAddr),
+    /// Dentro de um pacote de relay.
+    Relay {
+        /// O túnel com o nó que faz o relay (índice local).
+        host: u32,
+        /// O índice local do relay nesse túnel.
+        relay: u32,
+        /// O endereço na VPN de quem faz o relay.
+        through: IpAddr,
+    },
+}
+
+impl std::fmt::Display for Via {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Via::Udp(de) => write!(f, "{de}"),
+            Via::Relay { through, .. } => write!(f, "pelo relay {through}"),
+        }
+    }
+}
+
 /// Um túnel aberto.
 pub(crate) struct Host {
     pub(crate) vpn: IpAddr,
@@ -163,6 +228,10 @@ pub(crate) struct Host {
     pub(crate) stage0: Option<Vec<u8>>,
     pub(crate) stage2: Option<Vec<u8>>,
     pub(crate) rehandshaked: bool,
+    /// Os relays que passam por este túnel, pela outra ponta.
+    pub(crate) relay_for: HashMap<IpAddr, Relay>,
+    /// Os nós que fazem relay para chegar a este par, quando não há `remote`.
+    pub(crate) relays: Vec<IpAddr>,
 }
 
 /// O que o motor precisa para começar.
@@ -171,6 +240,7 @@ pub(crate) struct Params<U> {
     pub(crate) creds: Arc<Credentials>,
     pub(crate) under: U,
     pub(crate) am_lighthouse: bool,
+    pub(crate) am_relay: bool,
     pub(crate) notifier: Option<Arc<dyn Fn(State) + Send + Sync>>,
 }
 
@@ -196,6 +266,8 @@ pub(crate) struct Engine<U: Underlay> {
     creds: Arc<Credentials>,
     under: U,
     am_lighthouse: bool,
+    /// Este nó passa pacotes de um par a outro (`relay.am_relay`; só nos testes).
+    am_relay: bool,
     local_port: u16,
     /// Os endereços do nó na rede e as redes a que pertence (de todos os certificados).
     my_addrs: Vec<IpAddr>,
@@ -206,6 +278,8 @@ pub(crate) struct Engine<U: Underlay> {
     pending: HashMap<IpAddr, Pending>,
     pending_by_index: HashMap<u32, IpAddr>,
     remotes: HashMap<IpAddr, RemoteList>,
+    /// O índice local de cada relay e o túnel onde ele está (o `Relays` do `hostmap.go`).
+    relay_index: HashMap<u32, u32>,
     lighthouses: HashSet<IpAddr>,
     lighthouse_errors: HashMap<IpAddr, String>,
     lighthouse_backoff: HashMap<IpAddr, Duration>,
@@ -254,6 +328,7 @@ pub(crate) fn spawn<U: Underlay>(params: Params<U>) -> io::Result<Handles> {
         creds: params.creds,
         under: params.under,
         am_lighthouse: params.am_lighthouse,
+        am_relay: params.am_relay,
         local_port: local_addr.port(),
         my_addrs,
         my_nets,
@@ -263,6 +338,7 @@ pub(crate) fn spawn<U: Underlay>(params: Params<U>) -> io::Result<Handles> {
         pending: HashMap::new(),
         pending_by_index: HashMap::new(),
         remotes: HashMap::new(),
+        relay_index: HashMap::new(),
         lighthouses,
         lighthouse_errors: HashMap::new(),
         lighthouse_backoff: HashMap::new(),
@@ -400,6 +476,7 @@ impl<U: Underlay> Engine<U> {
             self.timers
                 .add(Instant::now() + intervalo, Key::LighthouseUpdate);
         }
+        self.connect_relays();
         self.recompute_state();
     }
 
@@ -466,6 +543,11 @@ impl<U: Underlay> Engine<U> {
                 vpn_addr: h.vpn,
                 name: h.peer_cert.name().to_owned(),
                 remote: h.remote,
+                relay: if h.remote.is_some() {
+                    None
+                } else {
+                    h.relays.first().copied()
+                },
                 initiator: h.initiator,
                 lighthouse: self.lighthouses.contains(&h.vpn),
             })

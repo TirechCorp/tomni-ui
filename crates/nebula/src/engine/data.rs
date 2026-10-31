@@ -1,12 +1,13 @@
 //! O plano de dados: o que chega pelo UDP, o que sai da pilha e a conferência dos túneis.
 //!
-//! Portado do Nebula (`outside.go`, `inside.go` e `connection_manager.go`).
+//! Portado do Nebula (`outside.go`, `inside.go` e `connection_manager.go`). O que chega por um
+//! relay passa pelo mesmo caminho, com [`Via::Relay`].
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use tokio::time::Instant;
 
-use super::{Cached, Engine, Key, ROAMING_SUPPRESS};
+use super::{Cached, Engine, Key, ROAMING_SUPPRESS, Via};
 use crate::cert::CertError;
 use crate::header::{self, Header, MessageType};
 use crate::tunnel::DecryptError;
@@ -27,25 +28,40 @@ impl<U: Underlay> Engine<U> {
         if self.in_my_networks(de.ip()) {
             return;
         }
+        self.on_outside(pacote, h, Via::Udp(de));
+    }
+
+    /// Um pacote do Nebula, direto do UDP ou de dentro de um pacote de relay.
+    pub(super) fn on_outside(&mut self, pacote: &[u8], h: Header, via: Via) {
         match h.kind {
-            MessageType::Handshake => self.on_handshake(pacote, de, h),
-            MessageType::RecvError => self.on_recv_error(de, h),
+            MessageType::Handshake => self.on_handshake(pacote, via, h),
+            MessageType::RecvError => {
+                // Pelo relay não há de onde saber o endereço: o Nebula também ignora.
+                if let Via::Udp(de) = via {
+                    self.on_recv_error(de, h);
+                }
+            }
             MessageType::Message
             | MessageType::LightHouse
             | MessageType::Test
-            | MessageType::CloseTunnel => self.on_encrypted(pacote, de, h),
-            MessageType::Control => {}
+            | MessageType::CloseTunnel
+            | MessageType::Control => self.on_encrypted(pacote, via, h),
         }
     }
 
-    fn on_encrypted(&mut self, pacote: &[u8], de: SocketAddr, h: Header) {
-        // Os pacotes por relay ficam para uma versão futura.
+    fn on_encrypted(&mut self, pacote: &[u8], via: Via, h: Header) {
         if h.kind == MessageType::Message && h.subtype == header::MESSAGE_RELAY {
+            // Relay dentro de relay não existe.
+            if let Via::Udp(de) = via {
+                self.on_relay_packet(pacote, de, h);
+            }
             return;
         }
         let indice = h.remote_index;
         let Some(host) = self.hosts.get_mut(&indice) else {
-            if h.kind != MessageType::CloseTunnel {
+            if h.kind != MessageType::CloseTunnel
+                && let Via::Udp(de) = via
+            {
                 self.send_recv_error(de, indice);
             }
             return;
@@ -55,7 +71,10 @@ impl<U: Underlay> Engine<U> {
             Err(DecryptError::Replay | DecryptError::Authentication) => return,
         };
         host.in_traffic = true;
-        self.roam(indice, de);
+        // Um pacote pelo relay não diz nada do endereço do par.
+        if let Via::Udp(de) = via {
+            self.roam(indice, de);
+        }
         match h.kind {
             MessageType::Message => self.on_ip_packet(indice, carga),
             MessageType::LightHouse => self.on_meta(indice, &carga),
@@ -65,6 +84,7 @@ impl<U: Underlay> Engine<U> {
                 }
             }
             MessageType::CloseTunnel => self.delete_host(indice),
+            MessageType::Control => self.on_control(indice, &carga),
             _ => {}
         }
     }
@@ -100,7 +120,7 @@ impl<U: Underlay> Engine<U> {
     }
 
     /// Um pacote autêntico chegou de outro endereço: o par mudou de lugar.
-    fn roam(&mut self, indice: u32, de: SocketAddr) {
+    pub(super) fn roam(&mut self, indice: u32, de: SocketAddr) {
         let Some(host) = self.hosts.get_mut(&indice) else {
             return;
         };
@@ -194,7 +214,7 @@ impl<U: Underlay> Engine<U> {
         enviado
     }
 
-    /// Cifra e manda uma mensagem por um túnel.
+    /// Cifra e manda uma mensagem por um túnel: direto, ou pelo relay quando não há endereço.
     pub(super) fn send_to_host(
         &mut self,
         indice: u32,
@@ -205,15 +225,20 @@ impl<U: Underlay> Engine<U> {
         let Some(host) = self.hosts.get_mut(&indice) else {
             return false;
         };
-        let Some(remoto) = host.remote else {
+        if host.remote.is_none() && host.relays.is_empty() {
             return false;
-        };
+        }
         let Some(pacote) = host.tunnel.encrypt(tipo, subtipo, host.remote_index, carga) else {
             return false;
         };
         host.out_traffic = true;
-        self.raw_send(&pacote, remoto);
-        true
+        match host.remote {
+            Some(remoto) => {
+                self.raw_send(&pacote, remoto);
+                true
+            }
+            None => self.send_by_relays(indice, &pacote),
+        }
     }
 
     /// Manda uma mensagem do Nebula a um par pelo endereço da VPN. Sem túnel, guarda e abre.
@@ -307,6 +332,13 @@ impl<U: Underlay> Engine<U> {
         let entrou = std::mem::take(&mut host.in_traffic);
         let saiu = std::mem::take(&mut host.out_traffic);
         let principal = self.primary.get(&vpn) == Some(&indice);
+        if !principal {
+            // Um túnel novo com o par tomou o lugar: os relays passam para ele.
+            self.migrate_to_primary(indice);
+        }
+        let Some(host) = self.hosts.get_mut(&indice) else {
+            return;
+        };
 
         if entrou {
             host.pending_deletion = false;
@@ -334,7 +366,9 @@ impl<U: Underlay> Engine<U> {
         }
         if principal && !saiu {
             let parado = agora.duration_since(host.last_activity);
-            if self.cfg.drop_inactive && parado >= self.cfg.inactivity_timeout {
+            // O túnel com um relay nosso fica: é por ele que os pares nos acham.
+            let carrega_relay = !host.relay_for.is_empty() || self.cfg.relay.relays.contains(&vpn);
+            if self.cfg.drop_inactive && parado >= self.cfg.inactivity_timeout && !carrega_relay {
                 self.close_tunnel(indice);
                 return;
             }

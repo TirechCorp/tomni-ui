@@ -15,7 +15,7 @@ if [ -z "${MANTER:-}" ]; then
 fi
 
 # Espera o sshd e o eco de cada nó direto.
-for servico in servicos servicos-chacha servicos-v1; do
+for servico in servicos servicos-chacha servicos-v1 servicos-atras servicos-atras-v1; do
     ok=0
     for _ in $(seq 1 60); do
         if docker compose exec -T "$servico" sh -c 'nc -z 127.0.0.1 22 && nc -z 127.0.0.1 7' >/dev/null 2>&1; then

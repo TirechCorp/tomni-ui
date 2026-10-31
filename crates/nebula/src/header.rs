@@ -35,7 +35,7 @@ pub(crate) enum MessageType {
     Test,
     /// O outro lado está fechando o túnel.
     CloseTunnel,
-    /// Controle (reservado; o Nebula não o usa no 1.11).
+    /// Controle: o pedido e a resposta de um relay (`NebulaControl`), cifrados no túnel.
     Control,
 }
 
@@ -74,7 +74,6 @@ pub(crate) const TEST_REQUEST: u8 = 0;
 /// O subtipo "resposta" do teste.
 pub(crate) const TEST_REPLY: u8 = 1;
 /// O subtipo "por relay" da mensagem.
-#[allow(dead_code)] // os relays ficam para depois (M48, fatia 5 adiada)
 pub(crate) const MESSAGE_RELAY: u8 = 1;
 
 /// Um cabeçalho lido.

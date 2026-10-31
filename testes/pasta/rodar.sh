@@ -13,7 +13,7 @@ if [ -z "${MANTER:-}" ]; then
     trap 'cd "$pasta" && docker compose down --remove-orphans >/dev/null 2>&1 || true' EXIT
 fi
 
-for porta in 22201 22202 22203; do
+for porta in 22201 22202 22203 22204; do
     ok=0
     for _ in $(seq 1 60); do
         if (exec 3<>"/dev/tcp/127.0.0.1/$porta" && head -c 4 <&3 | grep -q SSH) 2>/dev/null; then

@@ -154,12 +154,13 @@ As redes embutidas são crates à parte (`tomni-ui-openvpn`, `tomni-ui-wireguard
 | `tomni-ui-openvpn` | o cliente OpenVPN (TLS 1.2 e 1.3, `tls-auth`, `tls-crypt`, AES-GCM e ChaCha20) |
 | `tomni-ui-wireguard` | o WireGuard (lê o `.conf` do `wg-quick`) |
 | `tomni-ui-tailscale` | o nó do Tailscale e do Headscale, com DERP e MagicDNS |
-| `tomni-ui-nebula` | a rede Nebula (certificados v1 e v2, lighthouse e punch) |
+| `tomni-ui-nebula` | a rede Nebula (certificados v1 e v2, lighthouse, punch e relays) |
 | `tomni-ui-zerotier` | o nó do ZeroTier (VL1 e VL2) |
 | `tomni-ui-ai` | o cliente de modelos de linguagem |
 | `tomni-ui-markdown` | o Markdown em widgets e a edição de Markdown |
 | `tomni-ui-webview` | o `WebView` |
-| `tomni-ui-win32` | as chamadas Win32 sem API segura (o único crate com `unsafe`) |
+| `tomni-ui-win32` | as chamadas Win32 sem API segura (um dos dois crates com `unsafe`) |
+| `tomni-ui-macos` | as chamadas do macOS sem API segura (o outro crate com `unsafe`) |
 | `tomni-ui-test` | o `TestApp` e os snapshots |
 | `tomni-ui-cli` | a CLI `tomni-ui` |
 | `tomni-ui-mcp` | o servidor MCP `tomni-ui-mcp` |

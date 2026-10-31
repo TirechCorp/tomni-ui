@@ -155,12 +155,13 @@ The built-in networks are separate crates (`tomni-ui-openvpn`, `tomni-ui-wiregua
 | `tomni-ui-openvpn` | the OpenVPN client (TLS 1.2 and 1.3, `tls-auth`, `tls-crypt`, AES-GCM and ChaCha20) |
 | `tomni-ui-wireguard` | WireGuard (reads the `wg-quick` `.conf`) |
 | `tomni-ui-tailscale` | the Tailscale and Headscale node, with DERP and MagicDNS |
-| `tomni-ui-nebula` | the Nebula network (v1 and v2 certificates, lighthouse and punch) |
+| `tomni-ui-nebula` | the Nebula network (v1 and v2 certificates, lighthouse, punch and relays) |
 | `tomni-ui-zerotier` | the ZeroTier node (VL1 and VL2) |
 | `tomni-ui-ai` | the language model client |
 | `tomni-ui-markdown` | Markdown as widgets and Markdown editing |
 | `tomni-ui-webview` | the `WebView` |
-| `tomni-ui-win32` | Win32 calls with no safe API (the only crate with `unsafe`) |
+| `tomni-ui-win32` | Win32 calls with no safe API (one of the two crates with `unsafe`) |
+| `tomni-ui-macos` | macOS calls with no safe API (the other crate with `unsafe`) |
 | `tomni-ui-test` | `TestApp` and snapshots |
 | `tomni-ui-cli` | the `tomni-ui` CLI |
 | `tomni-ui-mcp` | the `tomni-ui-mcp` MCP server |

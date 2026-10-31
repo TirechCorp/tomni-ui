@@ -5,7 +5,7 @@ use russh::keys::agent::client::AgentClient;
 use russh::keys::ssh_key::LineEnding;
 use russh::keys::{Algorithm, PrivateKey};
 use russh::server::{self, Auth, Msg, Session};
-use russh::{Channel, ChannelId};
+use russh::{Channel, ChannelId, MethodKind, MethodSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -32,6 +32,8 @@ struct Servidor {
     x11_cookie: Option<Vec<u8>>,
     /// As portas que o servidor escuta a pedido do cliente (`-R`), com a tarefa de cada uma.
     remotas: std::collections::HashMap<u32, tokio::task::JoinHandle<()>>,
+    /// Quantas respostas do `keyboard-interactive` já passaram nesta conexão.
+    teclado: usize,
 }
 
 /// Como o servidor responde aos comandos (`exec`).
@@ -61,6 +63,10 @@ struct Modo {
     max_tentativas: Arc<AtomicUsize>,
     /// O shell despeja saída sem fim (o "despeja" digitado) até chegar um Ctrl+C.
     despejando: Arc<AtomicBool>,
+    /// A senha só entra pelo `keyboard-interactive` (o sshd do FreeBSD): o `password` é recusado.
+    so_teclado: Arc<AtomicBool>,
+    /// Depois da senha certa, o `keyboard-interactive` pede ainda um código (dois fatores).
+    pede_codigo: Arc<AtomicBool>,
 }
 
 impl Modo {
@@ -174,10 +180,57 @@ impl server::Handler for Servidor {
     type Error = russh::Error;
 
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
-        Ok(if user == "ana" && password == "senha" {
+        Ok(if self.modo.so_teclado.load(Ordering::SeqCst) {
+            self.registrar("auth password".into());
+            Auth::Reject {
+                proceed_with_methods: Some(MethodSet::from(
+                    &[MethodKind::PublicKey, MethodKind::KeyboardInteractive][..],
+                )),
+                partial_success: false,
+            }
+        } else if user == "ana" && password == "senha" {
             Auth::Accept
         } else {
             Auth::reject()
+        })
+    }
+
+    async fn auth_keyboard_interactive<'a>(
+        &'a mut self,
+        user: &str,
+        _: &str,
+        response: Option<server::Response<'a>>,
+    ) -> Result<Auth, Self::Error> {
+        if !self.modo.so_teclado.load(Ordering::SeqCst) {
+            return Ok(Auth::reject());
+        }
+        let pergunta = |texto: &'static str| Auth::Partial {
+            name: "".into(),
+            instructions: "".into(),
+            prompts: vec![(texto.into(), false)].into(),
+        };
+        let Some(response) = response else {
+            self.registrar("auth teclado".into());
+            // Como o PAM: primeiro uma rodada só com o aviso, sem pergunta.
+            self.teclado = 0;
+            return Ok(Auth::Partial {
+                name: "".into(),
+                instructions: "Bem-vinda".into(),
+                prompts: Vec::new().into(),
+            });
+        };
+        let respostas: Vec<_> = response.collect();
+        self.teclado += 1;
+        Ok(match self.teclado {
+            1 => pergunta("Password for ana@teste:"),
+            2 if user == "ana" && respostas.first().is_some_and(|r| &r[..] == b"senha") => {
+                if self.modo.pede_codigo.load(Ordering::SeqCst) {
+                    pergunta("Verification code:")
+                } else {
+                    Auth::Accept
+                }
+            }
+            _ => Auth::reject(),
         })
     }
 
@@ -638,6 +691,8 @@ impl Teste {
             sem_compressao: Arc::default(),
             max_tentativas: Arc::default(),
             despejando: Arc::default(),
+            so_teclado: Arc::default(),
+            pede_codigo: Arc::default(),
         };
         let chave = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
         let servidor = chave.public_key().clone();
@@ -665,6 +720,7 @@ impl Teste {
                     pty: false,
                     x11_cookie: None,
                     remotas: Default::default(),
+                    teclado: 0,
                 };
                 let chave = chave.clone();
                 // Uma thread por cliente: cada uma com o seu runtime, como o `Ssh` faz.
@@ -877,6 +933,43 @@ fn senha_errada() {
     assert_eq!(
         status,
         Status::Closed(Some("autenticação recusada para ana".into()))
+    );
+}
+
+#[test]
+fn a_senha_entra_pelo_teclado_quando_o_servidor_so_tem_esse_metodo() {
+    let teste = Teste::novo("so-teclado");
+    teste.modo.so_teclado.store(true, Ordering::SeqCst);
+    teste.conhecer_servidor();
+    let mut ssh = teste.builder().password("senha").connect();
+    let (texto, status) = ler_ate(&mut ssh, "bem-vinda");
+    assert_eq!(status, Status::Open, "{texto}");
+    let log = teste.log.lock().unwrap().clone();
+    let password = log.iter().position(|linha| linha == "auth password");
+    let teclado = log.iter().position(|linha| linha == "auth teclado");
+    assert!(password < teclado && password.is_some(), "{log:?}");
+
+    let mut ssh = teste.builder().password("outra").connect();
+    let (_, status) = ler_ate(&mut ssh, "\u{0}");
+    assert_eq!(
+        status,
+        Status::Closed(Some("autenticação recusada para ana".into()))
+    );
+}
+
+#[test]
+fn um_codigo_depois_da_senha_vira_erro_com_a_pergunta() {
+    let teste = Teste::novo("teclado-codigo");
+    teste.modo.so_teclado.store(true, Ordering::SeqCst);
+    teste.modo.pede_codigo.store(true, Ordering::SeqCst);
+    teste.conhecer_servidor();
+    let mut ssh = teste.builder().password("senha").connect();
+    let (_, status) = ler_ate(&mut ssh, "\u{0}");
+    assert_eq!(
+        status,
+        Status::Closed(Some(
+            "o servidor pediu mais do que a senha: Verification code:".into()
+        ))
     );
 }
 

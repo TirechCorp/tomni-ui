@@ -1,10 +1,13 @@
-//! As chamadas Win32 que nenhum crate expõe com API segura (M44). Único crate com `unsafe`.
+//! As chamadas Win32 que nenhum crate expõe com API segura (M44). Com o `tomni-ui-macos`, é um
+//! dos dois crates com `unsafe`.
 //!
 //! O Pageant (o agente do PuTTY) e o pid de quem pede uma chave precisam de
 //! `CryptProtectMemory`, `GetUserNameExA`, uma janela oculta com `WM_COPYDATA`, um file mapping
 //! com a checagem do dono, `GetNamedPipeClientProcessId`, `CreateToolhelp32Snapshot` e um pipe
-//! com security descriptor própria. O medidor de CPU do app lê `GetProcessTimes` e
-//! `GetProcessMemoryInfo`. A pesquisa não achou crate com API segura para nenhuma
+//! com security descriptor própria. O medidor de CPU e a lista de processos do app leem
+//! `GetProcessTimes`, `GetProcessMemoryInfo`, `GetProcessIoCounters`,
+//! `QueryFullProcessImageNameW` e o usuário do token (`OpenProcessToken`,
+//! `GetTokenInformation` e `LookupAccountSidW`). A pesquisa não achou crate com API segura para nenhuma
 //! delas, e o usuário aprovou o `unsafe` contido aqui em 19/10.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
@@ -26,7 +29,9 @@ mod tests;
 
 pub use crypto::{pageant_user_name, protect_memory_cross_process};
 pub use pipe::{named_pipe_client_pid, private_pipe};
-pub use process::{ProcessEntry, ProcessUsage, process_table, process_usage};
+pub use process::{
+    ProcessEntry, ProcessUsage, process_path, process_table, process_usage, process_user,
+};
 pub use window::{CopyDataWindow, window_exists};
 
 use std::io;

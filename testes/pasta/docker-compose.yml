@@ -1,5 +1,5 @@
 # Os servidores do teste real da sonda de pasta (`crates/terminal/tests/pasta_real.rs`), nas portas
-# 22201 a 22203 do próprio computador. O `rodar.sh` sobe, roda o teste e derruba.
+# 22201 a 22204 do próprio computador. O `rodar.sh` sobe, roda o teste e derruba.
 name: tomni-pasta
 
 services:
@@ -19,3 +19,11 @@ services:
     command: ["dropbear"]
     depends_on: [openssh-novo]
     ports: ["127.0.0.1:22203:22"]
+  # O OpenSSH do Debian sem o método `password`: a senha só entra pelo `keyboard-interactive` do
+  # PAM, como no sshd do FreeBSD e do pfSense.
+  openssh-teclado:
+    image: tomni-ui-pasta-debian
+    container_name: pasta-openssh-teclado
+    command: ["/usr/sbin/sshd", "-D", "-e", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=yes"]
+    depends_on: [openssh-antigo]
+    ports: ["127.0.0.1:22204:22"]

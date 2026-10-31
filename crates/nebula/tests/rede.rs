@@ -446,3 +446,83 @@ async fn sem_lighthouse_o_estado_diz_o_que_acontece() {
     })
     .await;
 }
+
+/// Os dois nós atrás de NAT simétrico (o CGNAT): o punch não passa, e o tráfego vai pelo
+/// lighthouse, que também é relay. `lh` é o certificado do lighthouse: o v1 leva as mensagens
+/// de controle e os relays no formato antigo; `ip_vpn_lh` é o IP dele na VPN.
+async fn conferir_relay(lh: &str, ip_vpn_lh: &str, no_a: &str, no_b: &str, alvo: &str) {
+    let rede = SimNet::new();
+    let (ip_lh, porta) = LIGHTHOUSE_PUBLICO.rsplit_once(':').unwrap();
+    let ponto = rede.host(ip_lh, porta.parse().unwrap());
+    let yaml = format!(
+        "pki:\n  ca: ca-25519.crt\n  cert: {lh}.crt\n  key: {lh}.key\n\
+         punchy:\n  punch: true\n"
+    );
+    let (config_lh, _) = Config::from_yaml(&yaml, Some(&pasta())).unwrap();
+    let lh = NebulaBuilder::new(config_lh)
+        .as_lighthouse()
+        .as_relay()
+        .start_on(ponto)
+        .await
+        .unwrap();
+    let config_no = |no: &str| {
+        let yaml = format!(
+            "pki:\n  ca: ca-25519.crt\n  cert: {no}.crt\n  key: {no}.key\n\
+             static_host_map:\n  \"{ip_vpn_lh}\": [\"{LIGHTHOUSE_PUBLICO}\"]\n\
+             lighthouse:\n  interval: 5\n  hosts: [\"{ip_vpn_lh}\"]\n\
+             punchy:\n  punch: true\n  respond: true\n  delay: 100ms\n  respond_delay: 100ms\n\
+             handshakes:\n  try_interval: 100ms\n  retries: 10\n\
+             relay:\n  relays: [\"{ip_vpn_lh}\"]\n"
+        );
+        Config::from_yaml(&yaml, Some(&pasta())).unwrap().0
+    };
+    let nat_a = rede.nat("198.51.100.1", NatKind::Symmetric);
+    let nat_b = rede.nat("198.51.100.2", NatKind::Symmetric);
+    let a = no(config_no(no_a), nat_a.endpoint("192.168.1.10", 4242)).await;
+    let b = no(config_no(no_b), nat_b.endpoint("192.168.2.10", 4242)).await;
+    conectado(&a).await;
+    conectado(&b).await;
+    eco(&a);
+
+    conferir_eco(&b, alvo, 256 * 1024).await;
+
+    let tuneis = esperar_tunel(&b, |t| t.iter().any(|x| x.vpn_addr == ip(alvo))).await;
+    let ate_a = tuneis.iter().find(|t| t.vpn_addr == ip(alvo)).unwrap();
+    assert_eq!(ate_a.remote, None, "sem caminho direto: {ate_a:?}");
+    assert_eq!(ate_a.relay, Some(ip(ip_vpn_lh)), "pelo relay: {ate_a:?}");
+    // O outro lado também fala pelo relay.
+    let tuneis = esperar_tunel(&a, |t| t.iter().any(|x| x.relay.is_some())).await;
+    assert!(
+        tuneis
+            .iter()
+            .all(|t| t.remote.is_some() || t.relay.is_some())
+    );
+
+    b.stop().await;
+    a.stop().await;
+    lh.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn atras_de_nat_simetrico_os_nos_falam_pelo_relay() {
+    prazo(conferir_relay(
+        "lighthouse",
+        LIGHTHOUSE_IP,
+        "no-v2",
+        "no-v2-b",
+        "10.42.0.20",
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_relay_com_certificado_v1_usa_o_formato_antigo() {
+    prazo(conferir_relay(
+        "lighthouse-v1",
+        "10.42.0.4",
+        "no-v1",
+        "no-v1-b",
+        "10.42.0.21",
+    ))
+    .await;
+}

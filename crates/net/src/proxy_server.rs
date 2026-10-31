@@ -1,15 +1,23 @@
-//! O servidor de proxy HTTP local: escuta em `127.0.0.1` e leva cada pedido do navegador por
-//! uma função de discagem (`dial`) que a aplicação dá: direto, por um [`crate::Proxy`], pela
-//! ponte SOCKS de uma VPN embutida. Entende o `CONNECT` (o HTTPS e os WebSockets) e o pedido em
-//! forma absoluta (`GET http://servidor/caminho`, o HTTP puro), que segue para o servidor em
-//! forma de origem e com `Connection: close`. Síncrono, uma thread por sentido de cada conexão.
+//! Os servidores locais que levam conexões por uma função de discagem (`dial`) que a aplicação
+//! dá: direto, por um [`crate::Proxy`], pela ponte SOCKS de uma VPN embutida.
 //!
-//! Não pede usuário e senha: o Chromium e o Firefox não aceitam a credencial do proxy na linha
-//! de comando e perguntariam numa janela. Ouve só no `127.0.0.1`.
+//! O [`HttpProxyServer`] é um proxy: o destino vem no pedido. Na mesma porta, entende o HTTP (o
+//! `CONNECT`, para o HTTPS e os WebSockets, e o pedido em forma absoluta, `GET
+//! http://servidor/caminho`, que segue para o servidor em forma de origem e com
+//! `Connection: close`) e o SOCKS5 (RFC 1928, sem autenticação, só o `CONNECT`; o nome do
+//! destino segue sem resolver, como o `socks5h`). O primeiro byte decide: o SOCKS5 começa com
+//! `0x05`, que nenhum pedido HTTP tem.
+//!
+//! O [`PortForward`] é uma porta que leva toda conexão ao mesmo destino, para os programas que
+//! não sabem usar proxy (um cliente de área de trabalho remota, por exemplo).
+//!
+//! Síncronos, uma thread por sentido de cada conexão. Não pedem usuário e senha: o Chromium e o
+//! Firefox não aceitam a credencial do proxy na linha de comando e perguntariam numa janela.
+//! Ouvem só onde a aplicação mandar (o `start` usa o `127.0.0.1`).
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -17,7 +25,7 @@ use std::time::Duration;
 
 use crate::connect_error_message;
 
-/// Quanto o navegador tem para mandar o cabeçalho do pedido.
+/// Quanto o cliente tem para mandar o cabeçalho do pedido (ou a conversa do SOCKS5).
 const HEAD_TIMEOUT: Duration = Duration::from_secs(30);
 /// O maior cabeçalho de pedido que se aceita.
 const MAX_HEAD: usize = 64 * 1024;
@@ -30,29 +38,29 @@ const HOP_HEADERS: [&str; 5] = [
     "keep-alive",
     "te",
 ];
+/// A versão do SOCKS, o primeiro byte de toda mensagem dele.
+const SOCKS_VERSION: u8 = 5;
 
 /// A função que abre a conexão TCP até `host:port`: é ela que decide o caminho (direto, proxy,
 /// VPN). O nome chega sem resolver, para ser resolvido do lado de lá.
 pub type Dial = dyn Fn(&str, u16) -> io::Result<TcpStream> + Send + Sync;
 
-/// As conexões abertas, para o [`HttpProxyServer`] fechar todas ao parar.
+/// As conexões abertas, para o servidor fechar todas ao parar.
 type Open = Mutex<HashMap<u64, [TcpStream; 2]>>;
 
-/// Um proxy HTTP local que leva cada conexão pela função `dial`. Para quando é solto (ou com
-/// [`HttpProxyServer::stop`]) e derruba os túneis abertos.
+/// Um proxy HTTP e SOCKS5 local que leva cada conexão pela função `dial`. Para quando é solto
+/// (ou com [`HttpProxyServer::stop`]) e derruba os túneis abertos.
 ///
 /// ```no_run
 /// use tomni_ui_net::{CONNECT_TIMEOUT, HttpProxyServer, connect_tcp};
 ///
 /// let proxy = HttpProxyServer::start(|host, port| connect_tcp(host, port, CONNECT_TIMEOUT))?;
 /// println!("--proxy-server={}", proxy.url());
+/// println!("ALL_PROXY={}", proxy.socks_url());
 /// # Ok::<(), std::io::Error>(())
 /// ```
 pub struct HttpProxyServer {
-    addr: SocketAddr,
-    stop: Arc<AtomicBool>,
-    open: Arc<Open>,
-    accept: Option<JoinHandle<()>>,
+    server: Server,
 }
 
 impl HttpProxyServer {
@@ -68,16 +76,115 @@ impl HttpProxyServer {
         addr: impl ToSocketAddrs,
         dial: impl Fn(&str, u16) -> io::Result<TcpStream> + Send + Sync + 'static,
     ) -> io::Result<Self> {
+        let server = Server::bind(addr, Mode::Proxy, Arc::new(dial), "tomni-http-proxy")?;
+        Ok(Self { server })
+    }
+
+    /// O endereço em que o proxy ouve.
+    pub fn addr(&self) -> SocketAddr {
+        self.server.addr
+    }
+
+    /// O endereço no formato do `--proxy-server` do Chromium e do `HTTP_PROXY`:
+    /// `http://127.0.0.1:porta`.
+    pub fn url(&self) -> String {
+        format!("http://{}", self.server.addr)
+    }
+
+    /// O mesmo proxy pelo SOCKS5, no formato do `ALL_PROXY` e do `curl`:
+    /// `socks5h://127.0.0.1:porta` (o `h`: o nome do destino segue sem resolver).
+    pub fn socks_url(&self) -> String {
+        format!("socks5h://{}", self.server.addr)
+    }
+
+    /// Quantas conexões passam pelo proxy agora.
+    pub fn connections(&self) -> usize {
+        self.server.connections()
+    }
+
+    /// Para de aceitar e fecha as conexões abertas. É o mesmo que soltar.
+    pub fn stop(self) {}
+}
+
+/// Uma porta local que leva toda conexão a `host:port` pela função `dial`: o `ssh -L` sem o
+/// SSH. Para quando é solta (ou com [`PortForward::stop`]) e derruba as conexões abertas. Se a
+/// discagem falha, a conexão do cliente fecha sem resposta.
+///
+/// ```no_run
+/// use tomni_ui_net::{CONNECT_TIMEOUT, PortForward, connect_tcp};
+///
+/// // xfreerdp /v:127.0.0.1:13389 chega ao 10.0.0.5:3389.
+/// let rdp = PortForward::bind("127.0.0.1:13389", "10.0.0.5", 3389, |host, port| {
+///     connect_tcp(host, port, CONNECT_TIMEOUT)
+/// })?;
+/// # Ok::<(), std::io::Error>(())
+/// ```
+pub struct PortForward {
+    server: Server,
+}
+
+impl PortForward {
+    /// Abre a porta em `addr` (`127.0.0.1:0`: uma livre) levando a `host:port`.
+    pub fn bind(
+        addr: impl ToSocketAddrs,
+        host: impl Into<String>,
+        port: u16,
+        dial: impl Fn(&str, u16) -> io::Result<TcpStream> + Send + Sync + 'static,
+    ) -> io::Result<Self> {
+        let mode = Mode::Fixed {
+            host: host.into(),
+            port,
+        };
+        let server = Server::bind(addr, mode, Arc::new(dial), "tomni-port-forward")?;
+        Ok(Self { server })
+    }
+
+    /// O endereço em que a porta ouve.
+    pub fn addr(&self) -> SocketAddr {
+        self.server.addr
+    }
+
+    /// Quantas conexões passam pela porta agora.
+    pub fn connections(&self) -> usize {
+        self.server.connections()
+    }
+
+    /// Para de aceitar e fecha as conexões abertas. É o mesmo que soltar.
+    pub fn stop(self) {}
+}
+
+/// O que o servidor faz com cada conexão.
+enum Mode {
+    /// O proxy: o destino vem no pedido HTTP ou SOCKS5.
+    Proxy,
+    /// Toda conexão vai ao mesmo destino.
+    Fixed { host: String, port: u16 },
+}
+
+/// O servidor por baixo dos dois: a escuta, as conexões abertas e o fim.
+struct Server {
+    addr: SocketAddr,
+    stop: Arc<AtomicBool>,
+    open: Arc<Open>,
+    accept: Option<JoinHandle<()>>,
+}
+
+impl Server {
+    fn bind(
+        addr: impl ToSocketAddrs,
+        mode: Mode,
+        dial: Arc<Dial>,
+        name: &'static str,
+    ) -> io::Result<Self> {
         let listener = TcpListener::bind(addr)?;
         let addr = listener.local_addr()?;
         let stop = Arc::new(AtomicBool::new(false));
         let open: Arc<Open> = Arc::default();
-        let dial: Arc<Dial> = Arc::new(dial);
         let accept = {
-            let (stop, open) = (Arc::clone(&stop), Arc::clone(&open));
+            let (stop, open, mode) = (Arc::clone(&stop), Arc::clone(&open), Arc::new(mode));
             thread::Builder::new()
-                .name("tomni-http-proxy".to_owned())
-                .spawn(move || accept_loop(&listener, &stop, &open, &dial))?
+                .name(name.to_owned())
+                .spawn(move || accept_loop(&listener, &stop, &open, &mode, &dial))?
         };
         Ok(Self {
             addr,
@@ -87,30 +194,23 @@ impl HttpProxyServer {
         })
     }
 
-    /// O endereço em que o proxy ouve.
-    pub fn addr(&self) -> SocketAddr {
-        self.addr
-    }
-
-    /// O endereço no formato do `--proxy-server` do Chromium: `http://127.0.0.1:porta`.
-    pub fn url(&self) -> String {
-        format!("http://{}", self.addr)
-    }
-
-    /// Quantas conexões passam pelo proxy agora.
-    pub fn connections(&self) -> usize {
+    fn connections(&self) -> usize {
         lock(&self.open).len()
     }
-
-    /// Para de aceitar e fecha as conexões abertas. É o mesmo que soltar.
-    pub fn stop(self) {}
 }
 
-impl Drop for HttpProxyServer {
+impl Drop for Server {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        // Acorda o `accept`, que está parado esperando alguém.
-        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1));
+        // Acorda o `accept`, que está parado esperando alguém (no `0.0.0.0`, pelo `127.0.0.1`).
+        let mut wake = self.addr;
+        if wake.ip().is_unspecified() {
+            wake.set_ip(match wake {
+                SocketAddr::V4(_) => Ipv4Addr::LOCALHOST.into(),
+                SocketAddr::V6(_) => Ipv6Addr::LOCALHOST.into(),
+            });
+        }
+        let _ = TcpStream::connect_timeout(&wake, Duration::from_secs(1));
         if let Some(accept) = self.accept.take() {
             let _ = accept.join();
         }
@@ -125,25 +225,151 @@ fn lock(open: &Open) -> std::sync::MutexGuard<'_, HashMap<u64, [TcpStream; 2]>> 
     open.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn accept_loop(listener: &TcpListener, stop: &Arc<AtomicBool>, open: &Arc<Open>, dial: &Arc<Dial>) {
+fn accept_loop(
+    listener: &TcpListener,
+    stop: &Arc<AtomicBool>,
+    open: &Arc<Open>,
+    mode: &Arc<Mode>,
+    dial: &Arc<Dial>,
+) {
     let ids = Arc::new(AtomicU64::new(0));
     for client in listener.incoming() {
         if stop.load(Ordering::SeqCst) {
             break;
         }
         let Ok(client) = client else { continue };
-        let (stop, open, dial, ids) = (
+        let (stop, open, mode, dial, ids) = (
             Arc::clone(stop),
             Arc::clone(open),
+            Arc::clone(mode),
             Arc::clone(dial),
             Arc::clone(&ids),
         );
         let _ = thread::Builder::new()
-            .name("tomni-http-proxy-conn".to_owned())
+            .name("tomni-proxy-conn".to_owned())
             .spawn(move || {
                 let id = ids.fetch_add(1, Ordering::Relaxed);
-                serve(client, &dial, &open, &stop, id);
+                serve(client, &mode, dial.as_ref(), &open, &stop, id);
             });
+    }
+}
+
+fn serve(mut client: TcpStream, mode: &Mode, dial: &Dial, open: &Open, stop: &AtomicBool, id: u64) {
+    let Some(server) = open_destination(&mut client, mode, dial) else {
+        return;
+    };
+    let (Ok(client_copy), Ok(server_copy)) = (client.try_clone(), server.try_clone()) else {
+        return;
+    };
+    lock(open).insert(id, [client_copy, server_copy]);
+    // O `stop` pode ter chegado entre o `accept` e o registro: a conexão não fica para trás.
+    if stop.load(Ordering::SeqCst) {
+        lock(open).remove(&id);
+        return;
+    }
+    pipe(client, server);
+    lock(open).remove(&id);
+}
+
+/// Abre o destino e manda a cada lado o que vai antes de ligar os dois. `None`: a conexão acaba
+/// aqui (a resposta de erro, se o protocolo tem uma, já foi).
+fn open_destination(client: &mut TcpStream, mode: &Mode, dial: &Dial) -> Option<TcpStream> {
+    if let Mode::Fixed { host, port } = mode {
+        return dial(host, *port).ok();
+    }
+    let _ = client.set_read_timeout(Some(HEAD_TIMEOUT));
+    let mut first = [0u8; 1];
+    let server = if matches!(client.peek(&mut first), Ok(1)) && first[0] == SOCKS_VERSION {
+        socks(client, dial)
+    } else {
+        http(client, dial)
+    };
+    let _ = client.set_read_timeout(None);
+    server
+}
+
+/// O pedido HTTP: o `CONNECT` ou a forma absoluta.
+fn http(client: &mut TcpStream, dial: &Dial) -> Option<TcpStream> {
+    match read_request(client).and_then(|request| route(request, dial)) {
+        Ok((mut server, head)) => {
+            client.write_all(&head.to_client).ok()?;
+            server.write_all(&head.to_server).ok()?;
+            Some(server)
+        }
+        Err(Reject(code, reason, message)) => {
+            let _ = respond(client, code, reason, &message);
+            None
+        }
+    }
+}
+
+/// A conversa do SOCKS5: oferece só o "sem autenticação", aceita só o `CONNECT` e devolve o
+/// destino com a resposta de sucesso já mandada.
+fn socks(client: &mut TcpStream, dial: &Dial) -> Option<TcpStream> {
+    let [_, count] = read_array::<2>(client)?;
+    let methods = read_bytes(client, count.into())?;
+    if !methods.contains(&0) {
+        let _ = client.write_all(&[SOCKS_VERSION, 0xff]);
+        return None;
+    }
+    client.write_all(&[SOCKS_VERSION, 0]).ok()?;
+    let [version, command, _, kind] = read_array::<4>(client)?;
+    if version != SOCKS_VERSION {
+        return None;
+    }
+    let host = match kind {
+        1 => Ipv4Addr::from(read_array::<4>(client)?).to_string(),
+        3 => {
+            let [len] = read_array::<1>(client)?;
+            String::from_utf8(read_bytes(client, len.into())?).ok()?
+        }
+        4 => Ipv6Addr::from(read_array::<16>(client)?).to_string(),
+        _ => {
+            let _ = socks_reply(client, 8);
+            return None;
+        }
+    };
+    let port = u16::from_be_bytes(read_array::<2>(client)?);
+    if command != 1 {
+        let _ = socks_reply(client, 7);
+        return None;
+    }
+    match dial(&host, port) {
+        Ok(server) => {
+            socks_reply(client, 0).ok()?;
+            Some(server)
+        }
+        Err(error) => {
+            let _ = socks_reply(client, socks_code(&error));
+            None
+        }
+    }
+}
+
+fn read_array<const N: usize>(client: &mut TcpStream) -> Option<[u8; N]> {
+    let mut bytes = [0u8; N];
+    client.read_exact(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+fn read_bytes(client: &mut TcpStream, len: usize) -> Option<Vec<u8>> {
+    let mut bytes = vec![0u8; len];
+    client.read_exact(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+/// A resposta do SOCKS5, com o endereço zerado (os clientes não usam).
+fn socks_reply(client: &mut TcpStream, code: u8) -> io::Result<()> {
+    client.write_all(&[SOCKS_VERSION, code, 0, 1, 0, 0, 0, 0, 0, 0])
+}
+
+/// O código do SOCKS5 para o erro da discagem (o texto não tem onde ir).
+fn socks_code(error: &io::Error) -> u8 {
+    match error.kind() {
+        io::ErrorKind::ConnectionRefused => 5,
+        io::ErrorKind::TimedOut | io::ErrorKind::HostUnreachable => 4,
+        io::ErrorKind::NetworkUnreachable => 3,
+        _ => 1,
     }
 }
 
@@ -158,33 +384,6 @@ struct Request {
 
 /// Por que o pedido não segue: o código e o texto da resposta.
 struct Reject(u16, &'static str, String);
-
-fn serve(mut client: TcpStream, dial: &Arc<Dial>, open: &Open, stop: &AtomicBool, id: u64) {
-    let _ = client.set_read_timeout(Some(HEAD_TIMEOUT));
-    let result = read_request(&mut client).and_then(|request| route(request, dial.as_ref()));
-    let (mut server, head) = match result {
-        Ok(ok) => ok,
-        Err(Reject(code, reason, message)) => {
-            let _ = respond(&mut client, code, reason, &message);
-            return;
-        }
-    };
-    let _ = client.set_read_timeout(None);
-    if client.write_all(&head.to_client).is_err() || server.write_all(&head.to_server).is_err() {
-        return;
-    }
-    let (Ok(client_copy), Ok(server_copy)) = (client.try_clone(), server.try_clone()) else {
-        return;
-    };
-    lock(open).insert(id, [client_copy, server_copy]);
-    // O `stop` pode ter chegado entre o `accept` e o registro: a conexão não fica para trás.
-    if stop.load(Ordering::SeqCst) {
-        lock(open).remove(&id);
-        return;
-    }
-    pipe(client, server);
-    lock(open).remove(&id);
-}
 
 /// O que se manda a cada lado antes de ligar os dois.
 struct Head {
@@ -555,6 +754,118 @@ mod tests {
             TcpStream::connect_timeout(&addr, TIMEOUT).is_err(),
             "a porta fechou"
         );
+    }
+
+    /// Faz a saudação do SOCKS5 sem autenticação e pede `CONNECT` a `destino` (o `ATYP` e o
+    /// endereço já montados) na `porta`; devolve o código da resposta.
+    fn pedir_socks(stream: &mut TcpStream, destino: &[u8], porta: u16) -> u8 {
+        stream.write_all(&[5, 1, 0]).unwrap();
+        let mut escolha = [0u8; 2];
+        stream.read_exact(&mut escolha).unwrap();
+        assert_eq!(escolha, [5, 0], "sem autenticação");
+        let mut pedido = vec![5, 1, 0];
+        pedido.extend_from_slice(destino);
+        pedido.extend_from_slice(&porta.to_be_bytes());
+        stream.write_all(&pedido).unwrap();
+        let mut resposta = [0u8; 10];
+        stream.read_exact(&mut resposta).unwrap();
+        assert_eq!((resposta[0], resposta[3]), (5, 1));
+        resposta[1]
+    }
+
+    #[test]
+    fn socks5_na_mesma_porta_leva_o_nome_sem_resolver() {
+        let (dial, pedidos) = dial_to(echo());
+        let proxy = HttpProxyServer::start(dial).unwrap();
+        assert_eq!(
+            proxy.socks_url(),
+            format!("socks5h://127.0.0.1:{}", proxy.addr().port())
+        );
+        let mut stream = to_proxy(&proxy);
+        let nome = b"rdp.cliente";
+        let mut destino = vec![3, nome.len() as u8];
+        destino.extend_from_slice(nome);
+        assert_eq!(pedir_socks(&mut stream, &destino, 3389), 0);
+        stream.write_all(b"ola").unwrap();
+        let mut eco = [0u8; 3];
+        stream.read_exact(&mut eco).unwrap();
+        assert_eq!(&eco, b"ola");
+        assert_eq!(
+            pedidos.recv_timeout(TIMEOUT).unwrap(),
+            ("rdp.cliente".to_owned(), 3389)
+        );
+
+        let mut stream = to_proxy(&proxy);
+        assert_eq!(pedir_socks(&mut stream, &[1, 10, 0, 0, 5], 22), 0);
+        assert_eq!(
+            pedidos.recv_timeout(TIMEOUT).unwrap(),
+            ("10.0.0.5".to_owned(), 22)
+        );
+        let mut stream = to_proxy(&proxy);
+        let mut v6 = vec![4];
+        v6.extend_from_slice(&Ipv6Addr::LOCALHOST.octets());
+        assert_eq!(pedir_socks(&mut stream, &v6, 80), 0);
+        assert_eq!(
+            pedidos.recv_timeout(TIMEOUT).unwrap(),
+            ("::1".to_owned(), 80)
+        );
+    }
+
+    #[test]
+    fn socks5_diz_o_erro_da_discagem_e_recusa_o_que_nao_entende() {
+        let proxy =
+            HttpProxyServer::start(|_, _| Err(io::Error::from(io::ErrorKind::ConnectionRefused)))
+                .unwrap();
+        let mut stream = to_proxy(&proxy);
+        assert_eq!(pedir_socks(&mut stream, &[1, 10, 0, 0, 5], 3389), 5);
+
+        // Só com usuário e senha: nenhum método serve.
+        let mut stream = to_proxy(&proxy);
+        stream.write_all(&[5, 1, 2]).unwrap();
+        let mut escolha = [0u8; 2];
+        stream.read_exact(&mut escolha).unwrap();
+        assert_eq!(escolha, [5, 0xff]);
+
+        // O `BIND` não é suportado.
+        let mut stream = to_proxy(&proxy);
+        stream.write_all(&[5, 1, 0]).unwrap();
+        stream.read_exact(&mut escolha).unwrap();
+        stream.write_all(&[5, 2, 0, 1, 10, 0, 0, 5, 0, 22]).unwrap();
+        let mut resposta = [0u8; 10];
+        stream.read_exact(&mut resposta).unwrap();
+        assert_eq!(resposta[1], 7);
+    }
+
+    #[test]
+    fn a_porta_encaminhada_leva_sempre_ao_mesmo_destino_e_fecha_ao_parar() {
+        let (dial, pedidos) = dial_to(echo());
+        let porta = PortForward::bind("127.0.0.1:0", "10.0.0.5", 3389, dial).unwrap();
+        let addr = porta.addr();
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+        stream.write_all(b"\x03\x00rdp").unwrap();
+        let mut eco = [0u8; 5];
+        stream.read_exact(&mut eco).unwrap();
+        assert_eq!(&eco, b"\x03\x00rdp", "os bytes passam sem cabeçalho");
+        assert_eq!(
+            pedidos.recv_timeout(TIMEOUT).unwrap(),
+            ("10.0.0.5".to_owned(), 3389)
+        );
+        assert_eq!(porta.connections(), 1);
+        porta.stop();
+        let mut resto = Vec::new();
+        assert_eq!(stream.read_to_end(&mut resto).unwrap_or(0), 0);
+        assert!(TcpStream::connect_timeout(&addr, TIMEOUT).is_err());
+
+        // A discagem que falha fecha a conexão do cliente.
+        let porta = PortForward::bind("127.0.0.1:0", "x", 1, |_, _| {
+            Err(io::Error::from(io::ErrorKind::ConnectionRefused))
+        })
+        .unwrap();
+        let mut stream = TcpStream::connect(porta.addr()).unwrap();
+        stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+        let mut resto = Vec::new();
+        assert_eq!(stream.read_to_end(&mut resto).unwrap_or(0), 0);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! painel, outra aba, uma estrutura nova) não fecha a conexão nem perde o histórico: a sessão
 //! fica no registro até o app chamar [`Session::dispose`].
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
@@ -161,6 +162,8 @@ pub(crate) struct SessionCore {
     pub(crate) busy: Duration,
     /// Os [`OutputTap`]s vivos; os soltos saem da lista na próxima leitura.
     taps: Vec<Weak<RefCell<TapBuffer>>>,
+    /// O que o app pendurou na sessão ([`Session::hold`]): solto com ela.
+    held: Vec<Box<dyn Any>>,
 }
 
 impl SessionCore {
@@ -208,6 +211,7 @@ impl SessionCore {
             sent: 0,
             busy: Duration::ZERO,
             taps: Vec::new(),
+            held: Vec::new(),
         }
     }
 
@@ -947,6 +951,28 @@ impl Session {
         Some(f(&core.emulator))
     }
 
+    /// Pendura `value` na sessão: ele vive até o [`Session::dispose`] (um reabrir não o solta).
+    /// É para o que acompanha a aba e não a conexão, como as portas que o app abre para ela. Numa
+    /// sessão já descartada, `value` é solto na hora.
+    pub fn hold(&self, value: impl Any) {
+        let value: Box<dyn Any> = Box::new(value);
+        if let Some(core) = self.core() {
+            core.borrow_mut().held.push(value);
+        }
+    }
+
+    /// Lê o primeiro valor do tipo `T` pendurado por [`Session::hold`]. `None` se não há um
+    /// (ou se a sessão foi descartada).
+    ///
+    /// # Panics
+    ///
+    /// Se chamada de dentro de uma ação que muda a sessão.
+    pub fn held<T: Any, R>(&self, f: impl FnOnce(&T) -> R) -> Option<R> {
+        let core = self.core()?;
+        let core = core.borrow();
+        core.held.iter().find_map(|v| v.downcast_ref::<T>()).map(f)
+    }
+
     /// Descarta a sessão: fecha a conexão (soltar o transporte a encerra) e libera o registro.
     /// O terminal que a mostrava continua com a tela até sair da árvore.
     pub fn dispose(self) {
@@ -997,6 +1023,32 @@ mod tests {
         assert_eq!(s.key_str(), "web-01");
         s.dispose();
         assert_eq!(Session::find("web-01"), None);
+    }
+
+    #[test]
+    fn o_que_se_pendura_vive_ate_o_dispose_e_nao_ate_o_fim_da_conexao() {
+        let guarda = Rc::new(());
+        let s = Session::new(Loopback::new());
+        s.hold(Rc::clone(&guarda));
+        s.hold(7_u16);
+        assert_eq!(s.held::<u16, _>(|n| *n), Some(7));
+        assert_eq!(s.held::<String, _>(|_| ()), None, "nada desse tipo");
+        s.core().unwrap().borrow_mut().close(None);
+        assert!(s.closed());
+        assert_eq!(Rc::strong_count(&guarda), 2, "a conexão fechada não solta");
+        s.dispose();
+        assert_eq!(Rc::strong_count(&guarda), 1, "o dispose solta");
+        assert_eq!(
+            s.held::<u16, _>(|n| *n),
+            None,
+            "a sessão descartada não tem nada"
+        );
+        s.hold(Rc::clone(&guarda));
+        assert_eq!(
+            Rc::strong_count(&guarda),
+            1,
+            "a sessão descartada solta na hora"
+        );
     }
 
     #[test]

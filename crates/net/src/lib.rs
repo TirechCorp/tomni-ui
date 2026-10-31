@@ -1,7 +1,8 @@
 //! Rede do Tomni UI (M30): o [`Proxy`] (SOCKS5 e HTTP CONNECT) e a abertura da conexão TCP
 //! (`connect`), com as mensagens de erro em português. É a base do SSH, do Telnet e, depois, do
 //! FTP e do S3; não depende de nenhuma outra parte da lib. O [`HttpProxyServer`] é o outro
-//! lado: um proxy HTTP local que leva o navegador por um caminho que o app escolhe.
+//! lado: um proxy HTTP e SOCKS5 local que leva o navegador (ou um shell) por um caminho que o
+//! app escolhe; o [`PortForward`] é uma porta local que leva sempre ao mesmo destino.
 
 #[cfg(feature = "http")]
 pub mod http;
@@ -13,7 +14,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 pub use proxy::Proxy;
-pub use proxy_server::{Dial, HttpProxyServer};
+pub use proxy_server::{Dial, HttpProxyServer, PortForward};
 
 /// Quanto se espera, por padrão, para o TCP chegar ao servidor.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -70,6 +71,13 @@ pub fn error_message(error: &io::Error) -> String {
         io::ErrorKind::ConnectionReset => "conexão interrompida pelo outro lado".to_owned(),
         io::ErrorKind::ConnectionAborted => "conexão interrompida".to_owned(),
         io::ErrorKind::TimedOut => "tempo de conexão esgotado".to_owned(),
+        // No macOS, o app sem a permissão da Rede Local (ou logo depois de trocar o binário,
+        // enquanto o sistema não refaz a liberação) recebe o mesmo `EHOSTUNREACH`.
+        io::ErrorKind::HostUnreachable if cfg!(target_os = "macos") => {
+            "servidor inalcançável (confira em Ajustes do Sistema > Privacidade e Segurança > \
+             Rede Local se o app tem acesso)"
+                .to_owned()
+        }
         io::ErrorKind::HostUnreachable | io::ErrorKind::NetworkUnreachable => {
             "servidor inalcançável".to_owned()
         }

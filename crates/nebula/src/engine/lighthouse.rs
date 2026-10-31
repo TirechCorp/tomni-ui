@@ -90,13 +90,30 @@ impl<U: Underlay> Engine<U> {
         lista
     }
 
-    /// Avisa um lighthouse dos nossos endereços.
+    /// Põe os relays nos detalhes, no formato da versão (o v1 só leva IPv4).
+    fn put_relays(detalhes: &mut Details, versao: Version, relays: &[IpAddr]) {
+        if versao == Version::V1 {
+            detalhes.old_relays = relays
+                .iter()
+                .filter_map(|r| match r {
+                    IpAddr::V4(v4) => Some(u32::from(*v4)),
+                    IpAddr::V6(_) => None,
+                })
+                .collect();
+        } else {
+            detalhes.relays = relays.to_vec();
+        }
+    }
+
+    /// Avisa um lighthouse dos nossos endereços e dos relays pelos quais aceitamos ser
+    /// alcançados.
     fn send_update(&mut self, lh: IpAddr) {
         let versao = self.meta_version(lh);
         let mut detalhes = Details {
             addrs: self.advertised(),
             ..Details::default()
         };
+        Self::put_relays(&mut detalhes, versao, &self.relays_for_me());
         if versao == Version::V1
             && let Some(IpAddr::V4(meu)) = self.my_addrs.iter().find(|a| a.is_ipv4()).copied()
         {
@@ -112,6 +129,8 @@ impl<U: Underlay> Engine<U> {
 
     /// O temporizador do aviso periódico.
     pub(super) fn lighthouse_update_tick(&mut self) {
+        // Os túneis com os nossos relays ficam de pé, como no Nebula.
+        self.connect_relays();
         let lista: Vec<IpAddr> = self.cfg.lighthouse.hosts.clone();
         for lh in lista {
             if self.primary.contains_key(&lh) {
@@ -180,13 +199,15 @@ impl<U: Underlay> Engine<U> {
                 if self.my_addrs.contains(&vpn) {
                     return;
                 }
-                let mudou = self
-                    .remotes
-                    .entry(vpn)
-                    .or_default()
-                    .set_reported(remetente, detalhes.addrs);
+                let relays = detalhes.all_relays();
+                let lista = self.remotes.entry(vpn).or_default();
+                let mudou = lista.set_reported(remetente, detalhes.addrs);
+                let relays_mudaram = lista.set_relays(remetente, relays);
                 if mudou {
                     self.retrigger(vpn);
+                }
+                if relays_mudaram && self.pending.contains_key(&vpn) {
+                    self.start_relays(vpn);
                 }
             }
             MetaType::HostPunchNotification if eh_lighthouse => {
@@ -214,17 +235,18 @@ impl<U: Underlay> Engine<U> {
         let Some((procurado, versao)) = detalhes.vpn_addr_and_version() else {
             return;
         };
-        let conhecidos = self
+        let (conhecidos, relays) = self
             .remotes
             .get(&procurado)
-            .map(|l| l.known(&self.my_nets))
+            .map(|l| (l.known(&self.my_nets), l.relays()))
             .unwrap_or_default();
-        if conhecidos.is_empty() {
+        if conhecidos.is_empty() && relays.is_empty() {
             return;
         }
         let Some(mut resposta) = Self::details_for(procurado, versao) else {
             return;
         };
+        Self::put_relays(&mut resposta, versao, &relays);
         resposta.addrs = self.fit_addrs(MetaType::HostQueryReply, resposta.clone(), conhecidos);
         let carga = Meta {
             kind: MetaType::HostQueryReply,
@@ -274,10 +296,10 @@ impl<U: Underlay> Engine<U> {
             }
         }
         let versao = detalhes.vpn_addr_and_version().map(|(_, v)| v);
-        self.remotes
-            .entry(remetente)
-            .or_default()
-            .set_reported(remetente, detalhes.addrs);
+        let relays = detalhes.all_relays();
+        let lista = self.remotes.entry(remetente).or_default();
+        lista.set_reported(remetente, detalhes.addrs);
+        lista.set_relays(remetente, relays);
         let versao = versao.unwrap_or_else(|| self.meta_version(remetente));
         let mut ack = Details::default();
         if versao == Version::V1

@@ -4,7 +4,8 @@
 //!
 //! A rede oficial: um lighthouse publicado em `127.0.0.1` e um nó `direto`, com um sshd (porta
 //! 22, usuário e senha `teste`) e um eco (porta 7). O nó do teste entra pelo lighthouse e abre as
-//! conexões pela pilha embutida, sem placa virtual.
+//! conexões pela pilha embutida, sem placa virtual. Nas redes `relay`, o nó `atras` só fala com o
+//! lighthouse, que também é relay (o CGNAT): o teste chega a ele pelo relay.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -19,7 +20,7 @@ fn pasta() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
-/// Os dados de uma das três redes do `docker-compose.yml`.
+/// Os dados de uma das redes do `docker-compose.yml`.
 struct Rede {
     /// O certificado do nó do teste (`app`, `app-chacha`, `app-v1`).
     no: &'static str,
@@ -58,6 +59,22 @@ const V1: Rede = Rede {
     direto: "10.42.0.13",
     cifra: "aes",
     conteiner: "nebula-direto-v1",
+};
+const RELAY: Rede = Rede {
+    no: "app",
+    porta: 14245,
+    lighthouse: "10.42.0.1",
+    direto: "10.42.0.10",
+    cifra: "aes",
+    conteiner: "nebula-atras",
+};
+const RELAY_V1: Rede = Rede {
+    no: "app-v1",
+    porta: 14246,
+    lighthouse: "10.42.0.4",
+    direto: "10.42.0.13",
+    cifra: "aes",
+    conteiner: "nebula-atras-v1",
 };
 
 fn config(rede: &Rede) -> Config {
@@ -265,4 +282,35 @@ async fn ssh_de_verdade_pela_ponte_da_rede() {
     .unwrap();
     assert_eq!(saida.trim(), "ok");
     nebula.stop().await;
+}
+
+/// O nó `atras` só aceita o UDP do relay: o eco tem que passar pelo relay oficial, e o túnel fica
+/// sem endereço direto.
+async fn pelo_relay(rede: &Rede) {
+    let nebula = entrar(rede).await;
+    eco(&nebula, rede.direto, 4 << 20).await;
+    let tuneis = nebula.tunnels().await;
+    let atras = tuneis
+        .iter()
+        .find(|t| t.vpn_addr.to_string() == rede.direto)
+        .unwrap_or_else(|| panic!("sem túnel com o nó de trás do relay: {tuneis:?}"));
+    assert_eq!(atras.remote, None, "{atras:?}");
+    assert_eq!(
+        atras.relay.map(|r| r.to_string()).as_deref(),
+        Some(rede.lighthouse),
+        "{atras:?}"
+    );
+    nebula.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "precisa da rede oficial em Docker: testes/nebula/rodar.sh"]
+async fn chega_ao_no_atras_do_cgnat_pelo_relay_oficial() {
+    pelo_relay(&RELAY).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "precisa da rede oficial em Docker: testes/nebula/rodar.sh"]
+async fn relay_oficial_com_certificados_v1() {
+    pelo_relay(&RELAY_V1).await;
 }

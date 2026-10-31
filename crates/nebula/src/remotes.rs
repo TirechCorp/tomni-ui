@@ -3,7 +3,8 @@
 //! Portado do Nebula (github.com/slackhq/nebula, licença MIT, `remote_list.go`). Cada par tem os
 //! endereços do `static_host_map`, o que cada lighthouse **contou** dele (`reported`), o último
 //! de onde um pacote autêntico dele chegou (`learned`) e os que já se mostraram errados
-//! (`blocked`).
+//! (`blocked`). Guarda também os relays pelos quais cada dono disse que o par aceita ser
+//! alcançado.
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
@@ -23,6 +24,8 @@ pub(crate) struct RemoteList {
     learned: Option<SocketAddr>,
     /// Os que responderam com outro nó: não se tenta mais.
     blocked: HashSet<SocketAddr>,
+    /// Os relays do par (IPs da VPN), por quem contou.
+    relays: HashMap<IpAddr, Vec<IpAddr>>,
 }
 
 /// Só o IPv4 vale: o underlay não tem IPv6.
@@ -49,6 +52,33 @@ impl RemoteList {
                 true
             }
         }
+    }
+
+    /// Troca os relays que `owner` contou. Devolve `true` se mudou.
+    pub(crate) fn set_relays(&mut self, owner: IpAddr, relays: Vec<IpAddr>) -> bool {
+        match self.relays.get(&owner) {
+            Some(atual) if *atual == relays => false,
+            None if relays.is_empty() => false,
+            _ => {
+                self.relays.insert(owner, relays);
+                true
+            }
+        }
+    }
+
+    /// Os relays do par, sem repetir, na ordem de quem contou.
+    pub(crate) fn relays(&self) -> Vec<IpAddr> {
+        let mut donos: Vec<&IpAddr> = self.relays.keys().collect();
+        donos.sort();
+        let mut todos = Vec::new();
+        for dono in donos {
+            for relay in &self.relays[dono] {
+                if !todos.contains(relay) {
+                    todos.push(*relay);
+                }
+            }
+        }
+        todos
     }
 
     /// Anota de onde chegou um pacote autêntico. Devolve `true` se mudou.
@@ -155,5 +185,21 @@ mod tests {
         assert!(!lista.set_reported(dono, vec![a("203.0.113.8:1")]));
         assert!(lista.set_reported(dono, vec![]));
         assert_eq!(lista.known(&[]), [a("203.0.113.7:1")]);
+    }
+
+    #[test]
+    fn os_relays_juntam_o_que_cada_dono_contou_sem_repetir() {
+        let mut lista = RemoteList::default();
+        let lh1: IpAddr = "10.42.0.1".parse().unwrap();
+        let lh2: IpAddr = "10.42.0.2".parse().unwrap();
+        let r1: IpAddr = "10.42.0.7".parse().unwrap();
+        let r2: IpAddr = "10.42.0.8".parse().unwrap();
+        assert!(!lista.set_relays(lh1, Vec::new()));
+        assert!(lista.set_relays(lh1, vec![r1]));
+        assert!(!lista.set_relays(lh1, vec![r1]));
+        assert!(lista.set_relays(lh2, vec![r1, r2]));
+        assert_eq!(lista.relays(), vec![r1, r2]);
+        assert!(lista.set_relays(lh1, Vec::new()));
+        assert_eq!(lista.relays(), vec![r1, r2]);
     }
 }

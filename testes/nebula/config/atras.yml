@@ -1,0 +1,45 @@
+# Um nó oficial "atrás de CGNAT" (certificado direto): o contêiner ao lado só deixa passar o UDP de e
+# para o relay, então quem quer chegar aqui precisa do relay. Chaves só de teste.
+pki:
+  ca: /fixtures/ca-25519.crt
+  cert: /fixtures/direto.crt
+  key: /fixtures/direto.key
+
+static_host_map:
+  "10.42.0.1": ["relay:4242"]
+
+lighthouse:
+  am_lighthouse: false
+  interval: 5
+  hosts:
+    - "10.42.0.1"
+
+relay:
+  relays:
+    - "10.42.0.1"
+  use_relays: true
+
+listen:
+  host: 0.0.0.0
+  port: 4242
+
+punchy:
+  punch: true
+  respond: true
+
+tun:
+  dev: nebula1
+  mtu: 1300
+
+logging:
+  level: info
+
+firewall:
+  outbound:
+    - port: any
+      proto: any
+      host: any
+  inbound:
+    - port: any
+      proto: any
+      host: any

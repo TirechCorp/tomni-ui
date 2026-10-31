@@ -1521,6 +1521,8 @@ fn identity_attributes(
     options: &WindowOptions,
 ) -> WindowAttributes {
     let _ = event_loop;
+    // No macOS e no Android nada abaixo muda os atributos: o ícone do macOS vem do `.app`.
+    #[cfg_attr(any(target_os = "macos", target_os = "android"), allow(unused_mut))]
     let mut attributes = attributes;
     if let Some(icon) = &options.icon {
         let make = |side: u32| {

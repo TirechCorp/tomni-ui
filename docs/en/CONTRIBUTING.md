@@ -82,7 +82,8 @@ network's fixtures come from the `gerar-fixtures.sh` in the corresponding folder
 | `crates/render` | `Canvas`, CPU (`vello_cpu`) and GPU (`vello`) backends |
 | `crates/theme` | `Drawer` and `FluentDrawer` (tokens in `tokens.rs`) |
 | `crates/platform` | `winit` window, input, IME, file picker, system tray and Android |
-| `crates/win32` | the Win32 calls (Windows only, the only crate with `unsafe`) |
+| `crates/win32` | the Win32 calls (Windows only, one of the two crates with `unsafe`) |
+| `crates/macos` | the macOS calls (macOS only, the other crate with `unsafe`) |
 | `crates/terminal` | the `Terminal`, the emulator (`vte`), the `Session`, `TerminalPanes` and the `Telnet`, `Process`, `Ssh` and `Serial` connections |
 | `crates/files` | `Fs` (local, SFTP, FTP, S3 and rclone), `Remote` and the `Transfers` queue |
 | `crates/net` | `Proxy` (SOCKS5 and HTTP CONNECT), `connect` and the HTTP agent |
@@ -131,9 +132,9 @@ network's fixtures come from the `gerar-fixtures.sh` in the corresponding folder
   and the fake servers. The recordings in `crates/test/tests/gravacoes/` are real program
   output.
 - **`unsafe`**: the workspace lint denies it. The exceptions are `android_main` (with a
-  justified `#[allow]`) and the `tomni-ui-win32` crate, with one `unsafe` per block and a
-  `// SAFETY:` on each. `std::env::set_var` isn't allowed either: pass the value through the
-  builder or the child process.
+  justified `#[allow]`) and the `tomni-ui-win32` and `tomni-ui-macos` crates, with one `unsafe`
+  per block and a `// SAFETY:` on each. `std::env::set_var` isn't allowed either: pass the value
+  through the builder or the child process.
 - **Third-party code**: OpenVPN is GPL-2.0, so `tomni-ui-openvpn` is written from the protocol
   description, without copying or translating the project's code. When porting code under a
   permissive license (as with WireGuard, Tailscale and Nebula), record the origin and the

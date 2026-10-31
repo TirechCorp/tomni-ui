@@ -1,8 +1,11 @@
-# A rede Nebula oficial do teste real do M48 (`crates/nebula/tests/nebula_real.rs`): três redes
+# A rede Nebula oficial do teste real do M48 (`crates/nebula/tests/nebula_real.rs`): cinco redes
 # independentes, com o mesmo CA, que diferem no que o teste confere:
 #   * `lighthouse` + `direto`          certificados v2, cifra AES-256-GCM (o padrão)
 #   * `lighthouse-chacha` + `direto-…` certificados v2, cifra ChaCha20-Poly1305
 #   * `lighthouse-v1` + `direto-v1`    certificados v1
+#   * `relay` + `atras`                o lighthouse também é relay, e o nó `atras` só fala com
+#                                      ele (o CGNAT): o teste chega ao nó pelo relay (v2)
+#   * `relay-v1` + `atras-v1`          o mesmo, com certificados v1
 # O teste (no computador, fora do Docker) entra pelos lighthouses publicados em 127.0.0.1 e fala
 # com o sshd (porta 22) e o eco (porta 7) de cada `direto`. A imagem do Nebula vem de
 # NEBULA_VERSAO (o padrão é a `latest`). Chaves só de teste; nunca use numa rede de verdade.
@@ -65,3 +68,37 @@ services:
     <<: *servicos
     network_mode: "service:direto-v1"
     depends_on: [direto-v1]
+
+  relay:
+    <<: *nebula
+    container_name: nebula-relay
+    command: ["-config", "/config/relay.yml"]
+    ports: ["127.0.0.1:14245:4242/udp"]
+  atras:
+    <<: *nebula
+    container_name: nebula-atras
+    command: ["-config", "/config/atras.yml"]
+    depends_on: [relay]
+  servicos-atras:
+    <<: *servicos
+    network_mode: "service:atras"
+    cap_add: [NET_ADMIN]
+    command: ["so-pelo-relay.sh", "relay"]
+    depends_on: [atras]
+
+  relay-v1:
+    <<: *nebula
+    container_name: nebula-relay-v1
+    command: ["-config", "/config/relay-v1.yml"]
+    ports: ["127.0.0.1:14246:4242/udp"]
+  atras-v1:
+    <<: *nebula
+    container_name: nebula-atras-v1
+    command: ["-config", "/config/atras-v1.yml"]
+    depends_on: [relay-v1]
+  servicos-atras-v1:
+    <<: *servicos
+    network_mode: "service:atras-v1"
+    cap_add: [NET_ADMIN]
+    command: ["so-pelo-relay.sh", "relay-v1"]
+    depends_on: [atras-v1]

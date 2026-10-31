@@ -72,6 +72,38 @@ fn tabela_tem_o_proprio_processo() {
         .expect("o processo do teste está na tabela");
     assert!(eu.parent_pid != 0);
     assert!(eu.name.to_lowercase().ends_with(".exe"), "{}", eu.name);
+    assert!(eu.threads >= 1);
+}
+
+#[test]
+fn o_caminho_e_o_usuario_do_proprio_processo() {
+    let caminho = process_path(std::process::id()).unwrap();
+    let exe = std::env::current_exe().unwrap();
+    assert_eq!(
+        caminho.to_lowercase(),
+        exe.to_string_lossy().to_lowercase(),
+        "o caminho do executável"
+    );
+    let usuario = process_user(std::process::id()).unwrap();
+    assert!(!usuario.is_empty());
+    assert!(!usuario.contains('\\'), "sem o domínio: {usuario}");
+    assert!(process_path(u32::MAX).is_err());
+    assert!(process_user(u32::MAX).is_err());
+}
+
+#[test]
+fn a_escrita_em_disco_aparece_nos_contadores() {
+    let antes = process_usage(std::process::id()).unwrap();
+    let arquivo = std::env::temp_dir().join(nome_unico("tomni-ui-win32-es"));
+    std::fs::write(&arquivo, vec![7u8; 256 * 1024]).unwrap();
+    let lido = std::fs::read(&arquivo).unwrap();
+    std::fs::remove_file(&arquivo).unwrap();
+    let depois = process_usage(std::process::id()).unwrap();
+    assert_eq!(lido.len(), 256 * 1024);
+    assert!(depois.written_bytes >= antes.written_bytes + 256 * 1024);
+    assert!(depois.read_bytes >= antes.read_bytes + 256 * 1024);
+    assert_eq!(depois.start_time, antes.start_time, "o mesmo processo");
+    assert!(antes.start_time > 0);
 }
 
 #[test]

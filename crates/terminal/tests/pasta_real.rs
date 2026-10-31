@@ -5,6 +5,8 @@
 //! Os servidores, nas portas do próprio computador: o OpenSSH atual do Alpine (22201, com o
 //! `sshd-session`), o OpenSSH 9.2 do Debian (22202) e o Dropbear (22203). Cada um tem os usuários
 //! `teste` (shell `bash`) e `peixe` (shell `fish`), com a senha igual ao nome e `sudo` sem senha.
+//! Na 22204, o mesmo OpenSSH do Debian sem o método `password`: a senha só entra pelo
+//! `keyboard-interactive` do PAM.
 
 use std::thread;
 use std::time::{Duration, Instant};
@@ -114,4 +116,32 @@ fn a_sonda_acha_a_pasta_nos_tres_servidores_com_fish() {
     for (nome, porta) in SERVIDORES {
         roda(nome, porta, "peixe");
     }
+}
+
+#[test]
+#[ignore = "precisa dos servidores de testes/pasta (Docker)"]
+fn a_senha_entra_pelo_teclado_no_openssh_sem_o_metodo_password() {
+    let sessao = abrir(22204, "teste");
+    assert!(
+        esperar(30, || !sessao.connecting()
+            && !sessao.text().trim().is_empty()),
+        "a conexão não abriu: {:?}",
+        sessao.close_reason()
+    );
+    let mut n = 0;
+    digitar(&sessao, "echo entrou", &mut n);
+    sessao.dispose();
+
+    let errada = Session::new(
+        Ssh::builder("127.0.0.1", 22204, "teste")
+            .password("errada")
+            .check_host_key(|_, _| true)
+            .connect(),
+    );
+    assert!(esperar(30, || errada.closed()), "{}", errada.text());
+    assert_eq!(
+        errada.close_reason().as_deref(),
+        Some("autenticação recusada para teste")
+    );
+    errada.dispose();
 }

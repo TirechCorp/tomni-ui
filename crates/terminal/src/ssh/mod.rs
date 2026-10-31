@@ -359,7 +359,8 @@ impl SshBuilder {
         }
     }
 
-    /// Autentica com a senha, se as chaves não bastarem.
+    /// Autentica com a senha, se as chaves não bastarem: pelo método `password` e, se o servidor
+    /// só aceitar o `keyboard-interactive` (o sshd do FreeBSD), respondendo com ela a pergunta.
     pub fn password(mut self, password: impl Into<String>) -> Self {
         self.password = Some(password.into());
         self
@@ -1446,8 +1447,8 @@ async fn open(
     Ok(handle)
 }
 
-/// Tenta as chaves e depois a senha (ou o método `none`, sem nenhuma das duas), na ordem do
-/// OpenSSH: primeiro a cópia no agente das chaves da conexão ([`SshBuilder::key_file`] e
+/// Tenta as chaves e depois a senha (pelo `password` ou pelo `keyboard-interactive`; sem senha nem
+/// chave, o método `none`), na ordem do OpenSSH: primeiro a cópia no agente das chaves da conexão ([`SshBuilder::key_file`] e
 /// [`SshBuilder::key`]), depois as próprias chaves e só então as outras do agente. O servidor
 /// derruba quem erra demais (o `MaxAuthTries`, 6 no OpenSSH): com muitas chaves no agente, a
 /// chave certa ofertada por último nunca chegaria.
@@ -1520,18 +1521,82 @@ async fn authenticate(handle: &mut Handle<Client>, hop: &SshBuilder) -> Result<(
     {
         return Ok(());
     }
-    let result = match &hop.password {
-        Some(password) => handle.authenticate_password(user, password.clone()).await,
-        None if hop.keys.is_empty() => handle.authenticate_none(user).await,
-        None => {
-            return Err(key_error.unwrap_or_else(|| format!("autenticação recusada para {user}")));
-        }
+    let accepted = match &hop.password {
+        Some(password) => authenticate_with_password(handle, user, password).await?,
+        None if hop.keys.is_empty() => handle
+            .authenticate_none(user)
+            .await
+            .map_err(|e| ssh_error(&e))?
+            .success(),
+        None => false,
     };
-    if result.map_err(|e| ssh_error(&e))?.success() {
+    if accepted {
         Ok(())
     } else {
         Err(key_error.unwrap_or_else(|| format!("autenticação recusada para {user}")))
     }
+}
+
+/// Quantas rodadas de perguntas do `keyboard-interactive` cabem numa entrega da senha. O PAM
+/// costuma mandar uma rodada vazia (só o aviso) antes ou depois da pergunta da senha.
+const KEYBOARD_ROUNDS: usize = 4;
+
+/// Entrega a senha pelo método `password` e, se o servidor recusar e oferecer o
+/// `keyboard-interactive` (o sshd do FreeBSD e do pfSense, o OpenSSH com
+/// `PasswordAuthentication no`), responde com ela a pergunta sem eco. Uma segunda pergunta (um
+/// código de dois fatores) não tem resposta aqui: vira erro com o texto dela.
+async fn authenticate_with_password(
+    handle: &mut Handle<Client>,
+    user: &str,
+    password: &str,
+) -> Result<bool, String> {
+    use client::KeyboardInteractiveAuthResponse as Reply;
+
+    let remaining = match handle
+        .authenticate_password(user, password)
+        .await
+        .map_err(|e| ssh_error(&e))?
+    {
+        client::AuthResult::Success => return Ok(true),
+        client::AuthResult::Failure {
+            remaining_methods, ..
+        } => remaining_methods,
+    };
+    if !remaining.contains(&russh::MethodKind::KeyboardInteractive) {
+        return Ok(false);
+    }
+    let mut reply = handle
+        .authenticate_keyboard_interactive_start(user, None::<String>)
+        .await
+        .map_err(|e| ssh_error(&e))?;
+    let mut answered = false;
+    for _ in 0..KEYBOARD_ROUNDS {
+        let prompts = match reply {
+            Reply::Success => return Ok(true),
+            Reply::Failure { .. } => return Ok(false),
+            Reply::InfoRequest { prompts, .. } => prompts,
+        };
+        let answers = match prompts.as_slice() {
+            [] => Vec::new(),
+            [prompt] if !prompt.echo && !answered => {
+                answered = true;
+                vec![password.to_owned()]
+            }
+            _ => {
+                let asked = prompts
+                    .iter()
+                    .map(|prompt| prompt.prompt.trim())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Err(format!("o servidor pediu mais do que a senha: {asked}"));
+            }
+        };
+        reply = handle
+            .authenticate_keyboard_interactive_respond(answers)
+            .await
+            .map_err(|e| ssh_error(&e))?;
+    }
+    Err("o servidor não terminou a autenticação por teclado".to_owned())
 }
 
 /// Abre a chave de `source`: lê o arquivo (com a senha, se veio) ou copia a da memória.

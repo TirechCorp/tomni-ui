@@ -1,6 +1,6 @@
 [package]
 name = "tomni-ui-win32"
-description = "As chamadas Win32 que nenhum crate expõe com API segura (Pageant, pid de quem pede a chave): o único crate com unsafe do projeto"
+description = "As chamadas Win32 que nenhum crate expõe com API segura (Pageant, pid de quem pede a chave): um dos dois crates com unsafe do projeto, ao lado do tomni-ui-macos"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

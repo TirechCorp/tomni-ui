@@ -1559,7 +1559,7 @@ dois proxies, cada um com o seu `known_hosts`. O `Telnet::builder` tem o `.proxy
 `.before_connect` iguais. O `Proxy` mostra a senha como `…` no `Debug`. Não há redirecionamento
 de portas nem X11.
 
-**Proxy HTTP local para o navegador** (`tomni_ui::net::HttpProxyServer`, sempre presente).
+**Proxy HTTP e SOCKS5 local** (`tomni_ui::net::HttpProxyServer`, sempre presente).
 `HttpProxyServer::start(|host, porta| tomni_ui::net::connect(host, porta, Some(&proxy),
 CONNECT_TIMEOUT))?` ouve numa porta livre do `127.0.0.1` e leva cada pedido pela função de
 discagem que o app dá (direto, por um `Proxy`, pela ponte SOCKS de uma VPN embutida): o nome
@@ -1567,9 +1567,18 @@ chega sem resolver, para ser resolvido do lado de lá. Entende o `CONNECT` (HTTP
 o pedido em forma absoluta do HTTP puro, que segue em forma de origem, sem os cabeçalhos do
 proxy e com `Connection: close`. `url()` dá `http://127.0.0.1:porta`, para o `--proxy-server`
 do Chromium ou o `network.proxy.http` do Firefox; `addr()`, `connections()`. Uma discagem que
-falha vira `502` com a mensagem em português; outro esquema, `501`. Não pede usuário e senha (os
-navegadores não aceitam a credencial na linha de comando). Para quando é solto ou com `stop()`,
-e derruba os túneis abertos.
+falha vira `502` com a mensagem em português; outro esquema, `501`. Na mesma porta, fala o
+SOCKS5 (sem autenticação, só o `CONNECT`, o nome segue sem resolver; o primeiro byte `0x05`
+decide): `socks_url()` dá `socks5h://127.0.0.1:porta`, para o `ALL_PROXY` de um shell; a
+discagem que falha vira o código do SOCKS (recusada, inalcançável, falha geral). Não pede
+usuário e senha (os navegadores não aceitam a credencial na linha de comando). Para quando é
+solto ou com `stop()`, e derruba os túneis abertos.
+
+**Porta encaminhada** (`tomni_ui::net::PortForward`): o `ssh -L` sem o SSH, para os programas
+que não sabem usar proxy. `PortForward::bind("127.0.0.1:13389", "10.0.0.5", 3389, discagem)?`
+leva toda conexão da porta ao mesmo destino pela discagem do app; `127.0.0.1:0` escolhe uma
+livre (`addr()` diz qual). A discagem que falha fecha a conexão do cliente. `connections()`;
+`stop()` ou soltar derruba as conexões.
 
 **Rede Nebula embutida** (crate `tomni-ui-nebula`, sem placa virtual e sem administrador; só o
 tráfego do app entra na rede, o sistema não vê nada). `NebulaBuilder::new(Config::from_yaml(yaml,
@@ -1582,8 +1591,12 @@ e do `Sftp`, ou ao `Proxy::open`; mostre-o na interface nunca (nem porta nem cre
 exponha a outros programas. `state()` é `Connecting`, `Connected { address, lighthouses, tunnels }`,
 `Retrying(msg)`, `Failed(msg)` ou `Stopped`; `wait_connected(limite)` espera; `tunnels()` lista
 os pares; `stop().await` avisa os pares com `CloseTunnel`; `close()` pede o mesmo sem esperar e sem consumir a `Nebula` (quando ela está num `Arc` dividido com as conexões, o estado vai a `Stopped`). Certificados v1 e v2, `aes` e
-`chachapoly`. Sem relays e sem P-256 por enquanto (um certificado P-256 é lido, mas usá-lo dá
-"certificado P-256 ainda não é suportado"). Nos testes, a feature `test-util` dá o `SimNet`
+`chachapoly`. Os relays do Nebula funcionam: com `relay.relays` no config, o nó aceita ser
+alcançado pelos relays listados (útil atrás de CGNAT, onde o punch não passa), e com
+`relay.use_relays` (padrão `true`) chega aos pares pelos relays que eles anunciam; o
+`TunnelInfo::relay` diz por qual relay o túnel passa quando `remote` é `None`. O app não faz papel
+de relay (`relay.am_relay` vira um `Warning`). Sem P-256 por enquanto (um certificado P-256 é
+lido, mas usá-lo dá "certificado P-256 ainda não é suportado"). Nos testes, a feature `test-util` dá o `SimNet`
 (UDP e NAT em memória) e `NebulaBuilder::start_on(..)`.
 
 **WireGuard embutido** (crate `tomni-ui-wireguard`, sem placa virtual, sem administrador e sem o
@@ -1973,7 +1986,10 @@ pub fn tela() -> impl View {
   fora do Linux e no `Loopback`; com o `process_id()` do shell local, dá o peso de cada aba), `tap()` (um `OutputTap` que guarda o texto limpo, como no log
   de texto, que chega depois dele; `take()` devolve e esvazia, e soltar o tap para de guardar; sem
   teto, então chame `take()` a cada verificação), `dispose()` (solta a conexão; chame ao fechar a
-  aba) e `Session::find(chave)`. `selection_text()` devolve o texto selecionado no `Terminal`
+  aba), `hold(valor)` (pendura um valor qualquer na sessão, solto só no `dispose()`: as portas
+  que o app abre para a aba, por exemplo; o fim da conexão e o `restart()` não soltam),
+  `held::<T, _>(|valor| ..)` (lê o primeiro valor do tipo `T` pendurado; `None` se não há) e
+  `Session::find(chave)`. `selection_text()` devolve o texto selecionado no `Terminal`
   que mostra a sessão (`None` se não há seleção; não é reativo) e `has_selection()` diz se há
   seleção (reativo: use em `item_visible` ou `disabled` de um item de menu de contexto, que é
   montado uma vez). `tomni_ui::terminal::plain_text(bytes)` dá o texto limpo do log de texto

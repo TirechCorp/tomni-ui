@@ -728,6 +728,23 @@ impl State {
         &mut self.grid_mut().lines[row]
     }
 
+    /// Na coluna 0 de uma linha que continua a de cima (quebra automática), volta para a última
+    /// coluna da de cima, como o PuTTY. Quem apaga com backspaces o que escreveu depois de uma
+    /// barra que quebrou (o 7z por trás do pv) redesenha no mesmo lugar em vez de descer uma linha
+    /// a cada volta.
+    fn backspace(&mut self) {
+        let row = self.cursor.row;
+        if self.cursor.col == 0 && !self.cursor.pending_wrap {
+            if self.modes.autowrap && row > 0 && self.grid().lines[row - 1].wrapped {
+                self.cursor.row = row - 1;
+                self.cursor.col = self.cols() - 1;
+            }
+        } else {
+            self.cursor.col = self.cursor.col.saturating_sub(1);
+        }
+        self.cursor.pending_wrap = false;
+    }
+
     /// Sobe a região de rolagem; as linhas que saem vão para o histórico se a região começa no
     /// topo da tela principal. Quem rolou a vista para cima continua vendo as mesmas linhas.
     fn scroll_up(&mut self, n: usize) {
@@ -1501,10 +1518,7 @@ impl Perform for State {
     fn execute(&mut self, byte: u8) {
         match byte {
             0x07 => self.bell = true,
-            0x08 => {
-                self.cursor.col = self.cursor.col.saturating_sub(1);
-                self.cursor.pending_wrap = false;
-            }
+            0x08 => self.backspace(),
             0x09 => self.tab_forward(1),
             0x0A..=0x0C => {
                 self.linefeed();
@@ -1696,6 +1710,33 @@ mod tests {
         assert_eq!(t.screen_text(), "abcde\nfg");
         assert!(t.grid().lines[0].wrapped);
         assert_eq!(t.cursor(), (1, 2));
+    }
+
+    #[test]
+    fn backspace_na_coluna_zero_volta_para_a_linha_que_quebrou() {
+        let mut t = term(5, 3);
+        t.feed(b"abcdefg\r\x08\x08XY");
+        assert_eq!(t.screen_text(), "abcXY\nfg");
+        assert_eq!(t.cursor(), (0, 4));
+        // Sem quebra na linha de cima, o backspace fica na coluna 0.
+        t.feed(b"\r\n\n\x08Z");
+        assert_eq!(t.screen_text(), "abcXY\nfg\nZ");
+        // Na espera da última coluna, anda uma para trás, como no xterm.
+        t.feed(b"\rabcde\x08W");
+        assert_eq!(t.screen_text(), "abcXY\nfg\nabcWe");
+    }
+
+    #[test]
+    fn a_barra_do_pv_com_o_andamento_do_7z_nao_desce_a_cada_volta() {
+        // O 7z escreve o andamento dele, o pv desenha a barra logo depois (e quebra), volta com
+        // `\r`, e o 7z apaga com backspaces o que escreveu: tudo fica nas mesmas duas linhas.
+        let mut t = term(20, 6);
+        for volta in 0..5 {
+            t.feed(format!("\x08\x08\x08\x08   \x08\x08\x08 {volta}M").as_bytes());
+            t.feed(format!("{:<19}\r", format!("barra {volta}")).as_bytes());
+        }
+        assert_eq!(t.cursor().0, 1);
+        assert_eq!(t.history_len(), 0);
     }
 
     #[test]
