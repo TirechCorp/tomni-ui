@@ -1,10 +1,13 @@
-//! `AreaChart`, `Sparkline` e `LevelMeter`, e o calor das células do `DataGrid`.
+//! `AreaChart`, `Sparkline`, `LevelMeter` e `HeatMap`, e o calor das células do `DataGrid`.
 //!
 //! O WinUI 3 não tem gráfico nem medidor de nível: o desenho segue a página Desempenho do
 //! Gerenciador de Tarefas do Windows 11 (a borda e a linha na cor da série, a área com a mesma
-//! cor translúcida e a grade fina) e o "mapa de calor" das colunas da lista de processos dele.
+//! cor translúcida e a grade fina, e os ladrilhos por processador lógico quando são muitos) e o
+//! "mapa de calor" das colunas da lista de processos dele.
 
-use tomni_ui_core::{ButtonState, ChartKind, ChartVisual, LevelMeterVisual};
+use tomni_ui_core::{
+    ButtonState, ChartKind, ChartVisual, HeatMapVisual, LevelMeterVisual, heat_map_cell,
+};
 use tomni_ui_render::kurbo::{BezPath, Line, Point, Rect, RoundedRect, Shape, Size, Stroke};
 use tomni_ui_render::peniko::Color;
 use tomni_ui_render::{Canvas, CanvasExt};
@@ -35,6 +38,17 @@ const METER_PADDING: f64 = 6.0;
 /// Altura natural do medidor; com mais altura, o fundo de hover ocupa toda ela.
 const METER_HEIGHT: f64 = 24.0;
 
+/// Tamanho natural do `HeatMap`, o mesmo do `AreaChart`: ele também ocupa o espaço que tiver.
+const HEAT_MAP_SIZE: Size = AREA_SIZE;
+/// Opacidade do ladrilho sem uso: o lugar dele continua à vista.
+const HEAT_MIN_ALPHA: f32 = 0.08;
+/// Opacidade do ladrilho no máximo.
+const HEAT_MAX_ALPHA: f32 = 0.9;
+/// Opacidade da borda dos ladrilhos.
+const HEAT_BORDER_ALPHA: f32 = 0.45;
+/// Lado mínimo do ladrilho para ter borda: abaixo disso, a borda tomaria a cor toda.
+const HEAT_BORDER_MIN: f64 = 6.0;
+
 pub(crate) fn measure(visual: &ChartVisual) -> Size {
     match visual.kind {
         ChartKind::Area => AREA_SIZE,
@@ -42,10 +56,10 @@ pub(crate) fn measure(visual: &ChartVisual) -> Size {
     }
 }
 
-/// Os pontos da série em `area`: o mais novo na borda direita, um passo por ponto.
-fn points(visual: &ChartVisual, area: Rect) -> Vec<Point> {
-    let fractions = visual.fractions();
-    let capacity = visual.capacity.max(2);
+/// Os pontos de uma série (de 0 a 1 do topo) em `area`: o mais novo na borda direita, um passo
+/// por ponto.
+fn points(fractions: &[f64], capacity: usize, area: Rect) -> Vec<Point> {
+    let capacity = capacity.max(2);
     let step = area.width() / (capacity - 1) as f64;
     let count = fractions.len();
     fractions
@@ -93,14 +107,34 @@ pub(crate) fn draw(canvas: &mut dyn Canvas, rect: Rect, visual: &ChartVisual, t:
         }
     }
     draw_series(canvas, inner, visual, color);
+    if !visual.secondary.is_empty() {
+        let secondary = t.resolve(visual.secondary_color);
+        draw_fractions(
+            canvas,
+            inner,
+            &visual.secondary_fractions(),
+            visual.capacity,
+            secondary,
+        );
+    }
     canvas.stroke(&rect.inflate(-0.5, -0.5), &Stroke::new(1.0), color);
 }
 
 /// A área e a linha da série em `area`, sem borda nem grade (a célula `Sparkline` do
 /// `DataGrid` desenha só isto).
 pub(crate) fn draw_series(canvas: &mut dyn Canvas, area: Rect, visual: &ChartVisual, color: Color) {
-    let inner = area;
-    let points = points(visual, inner);
+    draw_fractions(canvas, area, &visual.fractions(), visual.capacity, color);
+}
+
+/// A área e a linha de uma série já na escala (de 0 a 1 do topo).
+fn draw_fractions(
+    canvas: &mut dyn Canvas,
+    inner: Rect,
+    fractions: &[f64],
+    capacity: usize,
+    color: Color,
+) {
+    let points = points(fractions, capacity, inner);
     if let (Some(first), Some(last)) = (points.first(), points.last()) {
         canvas.push_clip(&inner.to_path(0.1));
         let mut line = BezPath::new();
@@ -211,6 +245,53 @@ pub(crate) fn draw_level_meter(
     }
 }
 
+pub(crate) fn measure_heat_map() -> Size {
+    HEAT_MAP_SIZE
+}
+
+/// Os ladrilhos: o fundo na cor com a opacidade do valor, a borda fina na mesma cor e, no
+/// ladrilho sob o ponteiro, a borda forte na cor do texto. As bordas caem no pixel inteiro.
+pub(crate) fn draw_heat_map(
+    canvas: &mut dyn Canvas,
+    rect: Rect,
+    visual: &HeatMapVisual,
+    t: &Tokens,
+) {
+    let count = visual.values.len();
+    if count == 0 || rect.width() < 2.0 || rect.height() < 2.0 {
+        return;
+    }
+    let color = t.resolve(visual.color);
+    for n in 0..count {
+        let cell = heat_map_cell(count, rect, n);
+        let cell = Rect::new(
+            cell.x0.round(),
+            cell.y0.round(),
+            cell.x1.round(),
+            cell.y1.round(),
+        );
+        if cell.width() < 1.0 || cell.height() < 1.0 {
+            continue;
+        }
+        let f = visual.fraction(n) as f32;
+        let alpha = HEAT_MIN_ALPHA + (HEAT_MAX_ALPHA - HEAT_MIN_ALPHA) * f;
+        canvas.fill(&cell, color.with_alpha(alpha));
+        if visual.hovered == Some(n) {
+            canvas.stroke(
+                &cell.inflate(-0.5, -0.5),
+                &Stroke::new(1.0),
+                t.text_fill_primary,
+            );
+        } else if cell.width().min(cell.height()) >= HEAT_BORDER_MIN {
+            canvas.stroke(
+                &cell.inflate(-0.5, -0.5),
+                &Stroke::new(1.0),
+                color.with_alpha(HEAT_BORDER_ALPHA),
+            );
+        }
+    }
+}
+
 /// O fundo de uma célula com calor `heat` (de 0 a 1), como as colunas da lista de processos
 /// do Gerenciador de Tarefas: do amarelo-claro ao laranja-avermelhado no tema claro, e tons
 /// escuros dos mesmos no escuro, para o texto primário continuar legível. `None` sem calor.
@@ -294,6 +375,8 @@ mod tests {
             capacity: 2,
             color: ThemeColor::Token(Token::AccentFillColorDefault),
             kind: ChartKind::Sparkline,
+            secondary: Vec::new(),
+            secondary_color: ThemeColor::Token(Token::SystemFillColorCritical),
         };
         let mut canvas = CpuCanvas::new(40, 40);
         draw(&mut canvas, Rect::new(0.0, 0.0, 40.0, 40.0), &visual, t);
@@ -305,6 +388,71 @@ mod tests {
         // A reta vai do canto de baixo à esquerda ao de cima à direita: embaixo dela, área.
         assert!(!branco(30, 30));
         assert!(branco(8, 20));
+    }
+
+    #[test]
+    fn a_segunda_serie_fica_por_cima_na_cor_dela() {
+        let t = &Tokens::LIGHT;
+        let mut visual = ChartVisual {
+            values: vec![100.0, 100.0],
+            max: 100.0,
+            capacity: 2,
+            color: ThemeColor::Token(Token::AccentFillColorDefault),
+            kind: ChartKind::Sparkline,
+            secondary: Vec::new(),
+            secondary_color: ThemeColor::Token(Token::SystemFillColorCritical),
+        };
+        let pixel = |visual: &ChartVisual| {
+            let mut canvas = CpuCanvas::new(40, 40);
+            draw(&mut canvas, Rect::new(0.0, 0.0, 40.0, 40.0), visual, t);
+            let px = canvas.render(Color::WHITE).sample(20, 34);
+            [px.r, px.g, px.b]
+        };
+        let sem = pixel(&visual);
+        visual.secondary = vec![50.0, 50.0];
+        let com = pixel(&visual);
+        // Embaixo da metade, a área vermelha por cima da azul: o pixel chega mais perto do
+        // vermelho do tema (que é mais escuro que o azul-claro, então o R também pode cair).
+        let vermelho = rgb(t.get(Token::SystemFillColorCritical));
+        let distancia = |px: [u8; 3]| {
+            px.iter()
+                .zip(vermelho)
+                .map(|(a, b)| (i32::from(*a) - i32::from(b)).pow(2))
+                .sum::<i32>()
+        };
+        assert!(distancia(com) < distancia(sem), "{sem:?} {com:?}");
+        assert!(com[2] < sem[2], "{sem:?} {com:?}");
+    }
+
+    #[test]
+    fn o_ladrilho_mais_usado_e_o_mais_cheio_de_cor() {
+        let t = &Tokens::LIGHT;
+        let visual = HeatMapVisual {
+            values: vec![0.0, 50.0, 100.0, 100.0],
+            max: 100.0,
+            color: ThemeColor::Token(Token::AccentFillColorDefault),
+            hovered: Some(3),
+        };
+        let rect = Rect::new(0.0, 0.0, 80.0, 20.0);
+        let mut canvas = CpuCanvas::new(80, 20);
+        draw_heat_map(&mut canvas, rect, &visual, t);
+        let imagem = canvas.render(Color::WHITE);
+        let centro = |n: usize| {
+            let c = heat_map_cell(4, rect, n).center();
+            let px = imagem.sample(c.x as u16, c.y as u16);
+            u32::from(px.r) + u32::from(px.g) + u32::from(px.b)
+        };
+        // Sobre o branco, mais cor é mais escuro; o sem uso ainda não é branco.
+        assert!(centro(0) < 3 * 255);
+        assert!(centro(1) < centro(0) && centro(2) < centro(1));
+        // O de baixo do ponteiro tem a borda na cor do texto (escura, no tema claro); o outro
+        // cheio, a borda na cor dele.
+        let borda = |n: usize| {
+            let c = heat_map_cell(4, rect, n);
+            let px = imagem.sample(c.x0.round() as u16, c.center().y as u16);
+            u32::from(px.r) + u32::from(px.g) + u32::from(px.b)
+        };
+        assert!(borda(3) + 60 < borda(2), "{} {}", borda(3), borda(2));
     }
 
     #[test]

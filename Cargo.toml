@@ -110,6 +110,9 @@ tokio = { version = "1", default-features = false }
 windows = "0.62.2"
 # As funções do macOS do `tomni-ui-macos`, na versão que o `Cargo.lock` já tinha. MIT OR Apache-2.0.
 libc = "0.2.190"
+# Os dicionários do IOKit no `tomni-ui-macos` (os discos), na versão que o `Cargo.lock` já tinha.
+# MIT OR Apache-2.0.
+core-foundation = "0.10.1"
 # Chaves SSH: gerar, cifrar e ler; a mesma versão exata que o `russh` fixa, para não entrar
 # uma segunda cópia. Apache-2.0 OR MIT.
 ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = ["std", "crypto", "encryption", "ppk", "rand_core"] }

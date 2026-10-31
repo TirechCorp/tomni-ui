@@ -35,6 +35,25 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `tomni_ui_win32::process_usage(pid)`: o tempo de CPU e a memória de um processo no Windows.
 - `tomni-ui-macos`, o crate das chamadas do macOS sem API segura: `process_usage(pid)` (o tempo
   de CPU e a memória de um processo) e `child_pids(pid)` (os filhos diretos).
+- `memory_status()` no `tomni-ui-win32` e no `tomni-ui-macos`: a memória física da máquina,
+  com o total e o disponível (`MemoryStatus`), como o Gerenciador de Tarefas e o Monitor de
+  Atividade mostram.
+- `cpu_times()` no `tomni-ui-win32` e no `tomni-ui-macos`: o tempo de cada núcleo lógico no modo
+  usuário, no kernel e ocioso (`CpuTimes`), para o gráfico por núcleo e o tempo de kernel.
+- `network_interfaces()` no `tomni-ui-win32` e no `tomni-ui-macos`: os bytes recebidos e
+  enviados de cada interface de rede, sem a de loopback, com o estado e se é física
+  (`NetworkInterface`).
+- `disk_counters()` no `tomni-ui-win32` e no `tomni-ui-macos`: as operações e os bytes lidos e
+  escritos de cada disco (`DiskCounters`), e no Windows o `ProcessUsage` ganha
+  `read_operations` e `write_operations`.
+- `AreaChart` e `Sparkline` ganham `.secondary(serie)` e `.secondary_color(..)`: uma segunda
+  série por cima da primeira, na mesma escala, em vermelho por padrão, como o tempo de kernel do
+  Gerenciador de Tarefas.
+- `HeatMap`: o mapa de calor, um ladrilho por valor, mais cheio de cor quanto maior, em
+  colunas e linhas que deixam cada ladrilho o mais perto de quadrado (`heat_map_grid`,
+  `heat_map_cell`, `heat_map_index_at`), com a dica do ladrilho sob o ponteiro
+  (`.cell_tooltip`). É o que o Gerenciador de Tarefas mostra no lugar dos gráficos por núcleo
+  quando eles são muitos. `TestApp::values(id)` dá a série de um gráfico ou os valores do mapa.
 - O ícone `Symbol::DataArea`.
 
 - `App::stall_log(caminho)` (e `WindowOptions::stall_log`): o registro de travamentos. Uma

@@ -1,12 +1,18 @@
-//! `AreaChart`, `Sparkline` e `LevelMeter`: um histórico de valores e um nível em quadradinhos.
+//! `AreaChart`, `Sparkline`, `LevelMeter` e `HeatMap`: um histórico de valores, um nível em
+//! quadradinhos e um ladrilho colorido por valor.
 //!
 //! O WinUI 3 não tem gráfico nem medidor de nível. O desenho segue a página Desempenho do
 //! Gerenciador de Tarefas do Windows 11 (a linha da série sobre a área com a mesma cor
 //! translúcida, a grade fina e a borda na cor da série) com os tokens do tema. O medidor segue os
 //! medidores de nível em segmentos: os quadradinhos acendem da esquerda para a direita, do
-//! amarelo-claro ao vermelho-escuro. Adaptações registradas na spec.
+//! amarelo-claro ao vermelho-escuro. O mapa de calor segue o que o Gerenciador mostra no lugar
+//! dos gráficos por processador lógico quando eles são muitos: um ladrilho por processador, mais
+//! cheio de cor quanto maior o uso. Adaptações registradas na spec.
 
 use std::fmt;
+
+use kurbo::{Point, Rect, Size};
+use tomni_ui_reactive::{Get, GetUntracked, Set, Signal, signal, untrack};
 
 use crate::button::ButtonState;
 use crate::color::{ThemeColor, Token};
@@ -47,14 +53,28 @@ pub struct ChartVisual {
     pub color: ThemeColor,
     /// Área ou sparkline.
     pub kind: ChartKind,
+    /// A segunda série, desenhada por cima da primeira na mesma escala (o tempo de kernel sob a
+    /// CPU do Gerenciador de Tarefas); vazia, não aparece.
+    pub secondary: Vec<f64>,
+    /// A cor da linha e da área da segunda série.
+    pub secondary_color: ThemeColor,
 }
 
 impl ChartVisual {
     /// Os valores que aparecem: os `capacity` mais novos, de 0 a 1 do topo (`NaN` vira 0).
     pub fn fractions(&self) -> Vec<f64> {
+        self.scale(&self.values)
+    }
+
+    /// Os valores da segunda série que aparecem, como em [`fractions`](Self::fractions).
+    pub fn secondary_fractions(&self) -> Vec<f64> {
+        self.scale(&self.secondary)
+    }
+
+    fn scale(&self, values: &[f64]) -> Vec<f64> {
         let max = if self.max > 0.0 { self.max } else { 1.0 };
-        let skip = self.values.len().saturating_sub(self.capacity.max(2));
-        self.values[skip..]
+        let skip = values.len().saturating_sub(self.capacity.max(2));
+        values[skip..]
             .iter()
             .map(|v| {
                 if v.is_nan() {
@@ -74,6 +94,8 @@ struct Chart {
     capacity: usize,
     color: ThemeColor,
     kind: ChartKind,
+    secondary: Prop<Vec<f64>>,
+    secondary_color: ThemeColor,
 }
 
 impl Chart {
@@ -84,6 +106,8 @@ impl Chart {
             capacity: CHART_CAPACITY,
             color: ThemeColor::Token(Token::AccentFillColorDefault),
             kind,
+            secondary: Prop::Value(Vec::new()),
+            secondary_color: ThemeColor::Token(Token::SystemFillColorCritical),
         }
     }
 
@@ -94,6 +118,8 @@ impl Chart {
             capacity: self.capacity,
             color: self.color,
             kind: self.kind,
+            secondary: self.secondary.get(),
+            secondary_color: self.secondary_color,
         }
     }
 
@@ -154,6 +180,20 @@ macro_rules! chart_widget {
             /// claro/escuro (`ThemeColor::themed`).
             pub fn color(mut self, color: impl Into<ThemeColor>) -> Self {
                 self.chart.color = color.into();
+                self
+            }
+
+            /// Uma segunda série (fixa, closure ou signal), por cima da primeira e na mesma
+            /// escala, com a linha e a área na [`secondary_color`](Self::secondary_color): o
+            /// tempo de kernel embaixo da CPU, como no Gerenciador de Tarefas. Vazia, some.
+            pub fn secondary<M>(mut self, values: impl IntoProp<Vec<f64>, M>) -> Self {
+                self.chart.secondary = values.into_prop();
+                self
+            }
+
+            /// A cor da segunda série: o vermelho do tema (`SystemFillColorCritical`) por padrão.
+            pub fn secondary_color(mut self, color: impl Into<ThemeColor>) -> Self {
+                self.chart.secondary_color = color.into();
                 self
             }
 
@@ -358,6 +398,225 @@ impl fmt::Debug for LevelMeter {
     }
 }
 
+/// Espaço entre os ladrilhos do [`HeatMap`].
+pub const HEAT_MAP_GAP: f64 = 2.0;
+
+/// Colunas e linhas de `count` ladrilhos em `size`: as que deixam o lado menor do ladrilho o
+/// maior possível, com os ladrilhos esticados para ocupar a área toda. Com o mesmo número de
+/// linhas, fica o de menos colunas (os ladrilhos mais largos e menos buracos na última linha).
+pub fn heat_map_grid(count: usize, size: Size) -> (usize, usize) {
+    if count == 0 {
+        return (0, 0);
+    }
+    let mut best = (count, 1, f64::MIN);
+    for columns in 1..=count {
+        let rows = count.div_ceil(columns);
+        if columns > 1 && count.div_ceil(columns - 1) == rows {
+            continue;
+        }
+        let (width, height) = heat_map_cell_size(size, columns, rows);
+        let side = width.min(height);
+        if side > best.2 {
+            best = (columns, rows, side);
+        }
+    }
+    (best.0, best.1)
+}
+
+fn heat_map_cell_size(size: Size, columns: usize, rows: usize) -> (f64, f64) {
+    let gaps = |n: usize| HEAT_MAP_GAP * n.saturating_sub(1) as f64;
+    (
+        (size.width - gaps(columns)) / columns.max(1) as f64,
+        (size.height - gaps(rows)) / rows.max(1) as f64,
+    )
+}
+
+/// O retângulo do ladrilho `index` de `count` num mapa de calor em `rect`, da esquerda para a
+/// direita e de cima para baixo.
+pub fn heat_map_cell(count: usize, rect: Rect, index: usize) -> Rect {
+    let (columns, rows) = heat_map_grid(count, rect.size());
+    let (width, height) = heat_map_cell_size(rect.size(), columns, rows);
+    let columns = columns.max(1);
+    let x = rect.x0 + (index % columns) as f64 * (width + HEAT_MAP_GAP);
+    let y = rect.y0 + (index / columns) as f64 * (height + HEAT_MAP_GAP);
+    Rect::new(x, y, x + width.max(0.0), y + height.max(0.0))
+}
+
+/// O ladrilho de `count` sob `point` num mapa de calor em `rect`. O espaço entre dois
+/// ladrilhos conta como o da esquerda (ou o de cima), para a dica não piscar entre eles.
+pub fn heat_map_index_at(count: usize, rect: Rect, point: Point) -> Option<usize> {
+    if count == 0 || !rect.contains(point) {
+        return None;
+    }
+    let (columns, rows) = heat_map_grid(count, rect.size());
+    let (width, height) = heat_map_cell_size(rect.size(), columns, rows);
+    let column = ((point.x - rect.x0) / (width + HEAT_MAP_GAP))
+        .floor()
+        .max(0.0) as usize;
+    let row = ((point.y - rect.y0) / (height + HEAT_MAP_GAP))
+        .floor()
+        .max(0.0) as usize;
+    let index = row.min(rows - 1) * columns + column.min(columns - 1);
+    (index < count).then_some(index)
+}
+
+/// Tudo o que o `Drawer` precisa saber de um `HeatMap` para pintá-lo.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeatMapVisual {
+    /// Um valor por ladrilho, na ordem.
+    pub values: Vec<f64>,
+    /// O valor do ladrilho mais cheio de cor; o que passa dele fica igual.
+    pub max: f64,
+    /// A cor dos ladrilhos.
+    pub color: ThemeColor,
+    /// O ladrilho sob o ponteiro, que ganha a borda forte.
+    pub hovered: Option<usize>,
+}
+
+impl HeatMapVisual {
+    /// O valor do ladrilho `index` de 0 a 1 do máximo (`NaN` e o que falta viram 0).
+    pub fn fraction(&self, index: usize) -> f64 {
+        let max = if self.max > 0.0 { self.max } else { 1.0 };
+        match self.values.get(index) {
+            Some(v) if !v.is_nan() => (v / max).clamp(0.0, 1.0),
+            _ => 0.0,
+        }
+    }
+}
+
+/// Um ladrilho por valor, mais cheio de cor quanto maior o valor: o uso de cada processador
+/// lógico quando são dezenas ou centenas, como o Gerenciador de Tarefas mostra no lugar dos
+/// gráficos.
+///
+/// ```
+/// use tomni_ui_core::HeatMap;
+/// use tomni_ui_reactive::prelude::*;
+///
+/// # let scope = Scope::root();
+/// # scope.run(|| {
+/// let nucleos = signal(vec![40.0, 10.0, 100.0]);
+/// let mapa = HeatMap::new(nucleos)
+///     .id("nucleos")
+///     .cell_tooltip(|n, uso| format!("Núcleo {n}: {uso:.0}%"));
+/// assert_eq!(mapa.visual().fraction(2), 1.0);
+/// # });
+/// # scope.clear();
+/// ```
+///
+/// Os ladrilhos ocupam a área toda, em colunas e linhas que deixam cada um o mais perto de
+/// quadrado ([`heat_map_grid`]). O topo é [`max`](Self::max) (100 por padrão, para
+/// porcentagens). O ladrilho sob o ponteiro ganha a borda forte, e a dica de
+/// [`cell_tooltip`](Self::cell_tooltip) fala dele.
+pub struct HeatMap {
+    common: Common,
+    values: Prop<Vec<f64>>,
+    max: Prop<f64>,
+    color: ThemeColor,
+    hovered: Signal<Option<usize>>,
+}
+
+impl HeatMap {
+    /// O mapa dos valores `values` (fixos, closure ou signal), um por ladrilho.
+    pub fn new<M>(values: impl IntoProp<Vec<f64>, M>) -> Self {
+        Self {
+            common: Common::default(),
+            values: values.into_prop(),
+            max: Prop::Value(100.0),
+            color: ThemeColor::Token(Token::AccentFillColorDefault),
+            hovered: signal(None),
+        }
+    }
+
+    /// O valor do ladrilho mais cheio (fixo, closure ou signal): 100 por padrão.
+    pub fn max<M>(mut self, max: impl IntoProp<f64, M>) -> Self {
+        self.max = max.into_prop();
+        self
+    }
+
+    /// A cor dos ladrilhos: o destaque do tema por padrão.
+    pub fn color(mut self, color: impl Into<ThemeColor>) -> Self {
+        self.color = color.into();
+        self
+    }
+
+    /// A dica do ladrilho sob o ponteiro: `f` recebe a posição dele (de 0) e o valor. Fica no
+    /// lugar da [`tooltip`](Self::tooltip), em cima do ladrilho.
+    pub fn cell_tooltip(mut self, f: impl Fn(usize, f64) -> String + 'static) -> Self {
+        let (values, hovered) = (self.values.clone(), self.hovered);
+        let tip = move || match hovered.get() {
+            Some(n) => values.get().get(n).map(|v| f(n, *v)).unwrap_or_default(),
+            None => String::new(),
+        };
+        self.common.tooltip = Some(tip.into_prop());
+        self
+    }
+
+    /// O ladrilho sob o ponteiro.
+    pub fn hovered(&self) -> Option<usize> {
+        self.hovered.get_untracked()
+    }
+
+    /// Estado para o `Drawer`.
+    pub fn visual(&self) -> HeatMapVisual {
+        HeatMapVisual {
+            values: self.values.get(),
+            max: self.max.get(),
+            color: self.color,
+            hovered: self.hovered.get(),
+        }
+    }
+}
+
+common_builders!(HeatMap);
+
+impl Widget for HeatMap {
+    fn kind(&self) -> &'static str {
+        "heat_map"
+    }
+
+    fn common(&self) -> &Common {
+        &self.common
+    }
+
+    fn look(&self) -> Look {
+        Look::HeatMap(self.visual())
+    }
+
+    fn handle(&mut self, event: &Event, cx: &mut EventCx) -> bool {
+        let hovered = match event {
+            Event::PointerMove { inside: true, .. } => {
+                let count = untrack(|| self.values.get().len());
+                heat_map_index_at(count, cx.rect(), cx.pointer())
+            }
+            Event::PointerMove { inside: false, .. } | Event::PointerCancel => None,
+            _ => return false,
+        };
+        if self.hovered.get_untracked() != hovered {
+            self.hovered.set(hovered);
+        }
+        false
+    }
+
+    fn interactive(&self) -> bool {
+        true
+    }
+
+    fn tip_anchor(&self, rect: Rect) -> Option<Rect> {
+        let n = self.hovered.get_untracked()?;
+        let count = untrack(|| self.values.get().len());
+        Some(heat_map_cell(count, rect, n))
+    }
+}
+
+impl fmt::Debug for HeatMap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HeatMap")
+            .field("common", &self.common)
+            .field("visual", &untrack(|| self.visual()))
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,7 +646,84 @@ mod tests {
             capacity: 3,
             color: ThemeColor::Token(Token::AccentFillColorDefault),
             kind: ChartKind::Area,
+            secondary: vec![5.0, 20.0],
+            secondary_color: ThemeColor::Token(Token::SystemFillColorCritical),
         };
         assert_eq!(visual.fractions(), vec![0.5, 0.0, 1.0]);
+        assert_eq!(visual.secondary_fractions(), vec![0.05, 0.2]);
+    }
+
+    #[test]
+    fn os_ladrilhos_ficam_o_mais_perto_de_quadrados() {
+        // 4 numa faixa larga: uma linha; 12 numa área 5 vezes mais larga que alta: 2 linhas de 6.
+        assert_eq!(heat_map_grid(4, Size::new(600.0, 130.0)), (4, 1));
+        assert_eq!(heat_map_grid(12, Size::new(650.0, 130.0)), (6, 2));
+        // 512 cabem e ninguém fica com o lado menor que 10 px.
+        let (colunas, linhas) = heat_map_grid(512, Size::new(650.0, 130.0));
+        assert!(colunas * linhas >= 512 && colunas * (linhas - 1) < 512);
+        let rect = Rect::new(0.0, 0.0, 650.0, 130.0);
+        let ultimo = heat_map_cell(512, rect, 511);
+        assert!(ultimo.width().min(ultimo.height()) >= 10.0, "{ultimo:?}");
+        assert!(ultimo.y1 <= 130.0 + 1e-9 && ultimo.x1 <= 650.0 + 1e-9);
+        assert_eq!(heat_map_grid(0, rect.size()), (0, 0));
+    }
+
+    #[test]
+    fn o_ponteiro_acha_o_ladrilho_de_baixo() {
+        let rect = Rect::new(10.0, 10.0, 110.0, 50.0);
+        // 8 em 100×40: 4 colunas e 2 linhas, de 23,5×19 px.
+        assert_eq!(heat_map_grid(8, rect.size()), (4, 2));
+        for n in 0..8 {
+            let centro = heat_map_cell(8, rect, n).center();
+            assert_eq!(heat_map_index_at(8, rect, centro), Some(n));
+        }
+        // No vão entre dois, o da esquerda; fora, nenhum; na última linha incompleta, nenhum.
+        let primeiro = heat_map_cell(8, rect, 0);
+        assert_eq!(
+            heat_map_index_at(8, rect, Point::new(primeiro.x1 + 1.0, primeiro.center().y)),
+            Some(0)
+        );
+        assert_eq!(heat_map_index_at(8, rect, Point::new(5.0, 20.0)), None);
+        assert_eq!(
+            heat_map_index_at(7, rect, heat_map_cell(8, rect, 7).center()),
+            None
+        );
+    }
+
+    #[test]
+    fn a_dica_fala_do_ladrilho_sob_o_ponteiro() {
+        use tomni_ui_reactive::prelude::*;
+        let scope = Scope::root();
+        scope.run(|| {
+            let mapa = HeatMap::new(vec![40.0, f64::NAN, 250.0])
+                .cell_tooltip(|n, uso| format!("Núcleo {n}: {uso:.0}%"));
+            let dica = mapa.common().tooltip.clone().unwrap();
+            assert_eq!(dica.get(), "");
+            mapa.hovered.set(Some(2));
+            assert_eq!(dica.get(), "Núcleo 2: 250%");
+            let visual = mapa.visual();
+            assert_eq!(visual.hovered, Some(2));
+            assert_eq!(
+                [visual.fraction(0), visual.fraction(1), visual.fraction(2)],
+                [0.4, 0.0, 1.0]
+            );
+            assert_eq!(visual.fraction(9), 0.0);
+        });
+        scope.clear();
+    }
+
+    #[test]
+    fn a_segunda_serie_segue_o_signal() {
+        use tomni_ui_reactive::prelude::*;
+        let scope = Scope::root();
+        scope.run(|| {
+            let kernel = signal(vec![1.0]);
+            let grafico = AreaChart::new(vec![10.0]).secondary(kernel);
+            assert_eq!(grafico.visual().secondary, vec![1.0]);
+            kernel.set(vec![1.0, 2.0]);
+            assert_eq!(grafico.visual().secondary, vec![1.0, 2.0]);
+            assert!(Sparkline::new(vec![1.0]).visual().secondary.is_empty());
+        });
+        scope.clear();
     }
 }

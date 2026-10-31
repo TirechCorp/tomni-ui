@@ -954,7 +954,8 @@ impl Ui {
                 #[cfg(not(any(feature = "terminal", feature = "webview-widget")))]
                 let _ = custom;
             }
-            Look::Form
+            Look::HeatMap(_)
+            | Look::Form
             | Look::Column
             | Look::Row
             | Look::Fragment

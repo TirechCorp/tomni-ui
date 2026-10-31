@@ -97,7 +97,7 @@ pub mod prelude {
         Align, AreaChart, AutoSuggestBox, Border, Brush, Button, Card, CellValue, CheckBox, Color,
         Column, ColumnWidth, ComboBox, ContentDialog, DataGrid, DataGridColumn, DataGridDrop,
         DataGridRow, Density, DockController, DockHost, DockLayout, DockMode, DockPane, DockSide,
-        Edit, Expander, Flyout, For, Form, Icon, Image, InfoBar, InfoBarSeverity, Insets,
+        Edit, Expander, Flyout, For, Form, HeatMap, Icon, Image, InfoBar, InfoBarSeverity, Insets,
         ItemStatus, Justify, Key, LevelMeter, MenuBar, MenuFlyout, NavigationMode, NavigationView,
         NumberBox, PasswordReveal, ProgressBar, ProgressRing, ProgressStatus, PropertyGrid,
         RadioButtons, RichText, Row, RowTone, ScrollViewer, SettingsCard, SettingsExpander,

@@ -203,6 +203,8 @@ pub(crate) fn draw_row(
                 capacity: values.len().max(2),
                 color: ThemeColor::Token(Token::AccentFillColorDefault),
                 kind: ChartKind::Sparkline,
+                secondary: Vec::new(),
+                secondary_color: ThemeColor::Token(Token::SystemFillColorCritical),
             };
             let area = area.inflate(0.0, -SPARK_INSET);
             crate::chart::draw_series(canvas, area, &spark, t.accent_fill_default);

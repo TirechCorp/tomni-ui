@@ -555,7 +555,7 @@ impl<H: Handler> Janela<H> {
     fn share_dialogs(&self) {
         #[cfg(not(target_os = "android"))]
         tomni_ui_core::dialogs::set_service(Rc::new(crate::file_dialog::SystemFileDialogs::new(
-            self.window.clone(),
+            &self.window,
         )));
     }
 

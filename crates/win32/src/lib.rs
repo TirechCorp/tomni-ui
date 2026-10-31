@@ -7,7 +7,10 @@
 //! com security descriptor própria. O medidor de CPU e a lista de processos do app leem
 //! `GetProcessTimes`, `GetProcessMemoryInfo`, `GetProcessIoCounters`,
 //! `QueryFullProcessImageNameW` e o usuário do token (`OpenProcessToken`,
-//! `GetTokenInformation` e `LookupAccountSidW`). A pesquisa não achou crate com API segura para nenhuma
+//! `GetTokenInformation` e `LookupAccountSidW`); a memória da máquina, o
+//! `GlobalMemoryStatusEx`; o tempo de cada núcleo, o `NtQuerySystemInformation`; o tráfego das
+//! interfaces de rede, o `GetIfTable2`; e as operações de cada disco, o
+//! `IOCTL_DISK_PERFORMANCE`. A pesquisa não achou crate com API segura para nenhuma
 //! delas, e o usuário aprovou o `unsafe` contido aqui em 19/10.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
@@ -19,7 +22,11 @@
 #![deny(unsafe_op_in_unsafe_fn, clippy::undocumented_unsafe_blocks)]
 #![deny(clippy::multiple_unsafe_ops_per_block)]
 
+mod cpu;
 mod crypto;
+mod disk;
+mod memory;
+mod network;
 mod pipe;
 mod process;
 mod window;
@@ -27,7 +34,11 @@ mod window;
 #[cfg(test)]
 mod tests;
 
+pub use cpu::{CpuTimes, cpu_times};
 pub use crypto::{pageant_user_name, protect_memory_cross_process};
+pub use disk::{DiskCounters, disk_counters};
+pub use memory::{MemoryStatus, memory_status};
+pub use network::{NetworkInterface, network_interfaces};
 pub use pipe::{named_pipe_client_pid, private_pipe};
 pub use process::{
     ProcessEntry, ProcessUsage, process_path, process_table, process_usage, process_user,

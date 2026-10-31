@@ -1,6 +1,6 @@
 [package]
 name = "tomni-ui-macos"
-description = "As chamadas do macOS que nenhum crate expõe com API segura (o uso de CPU e de memória de um processo e os filhos dele): um dos dois crates com unsafe do projeto, ao lado do tomni-ui-win32"
+description = "As chamadas do macOS que nenhum crate expõe com API segura (o uso de CPU e de memória de um processo, os filhos dele e os discos): um dos dois crates com unsafe do projeto, ao lado do tomni-ui-win32"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,7 @@ repository.workspace = true
 # Só existe no macOS: nos outros sistemas o crate é vazio e não puxa nada.
 [target.'cfg(target_os = "macos")'.dependencies]
 libc.workspace = true
+core-foundation.workspace = true
 
 [lints]
 workspace = true

@@ -76,7 +76,7 @@ network's fixtures come from the `gerar-fixtures.sh` in the corresponding folder
 | Folder | What |
 | --- | --- |
 | `crates/reactive` | signals (`reactive_graph`) |
-| `crates/core` | widgets, tree, focus, events, `IntoProp` and the system tray model |
+| `crates/core` | widgets (the charts, the meter and the heat map in `chart.rs`), tree, focus, events, `IntoProp` and the system tray model |
 | `crates/layout` | flex with `taffy` |
 | `crates/text` | `parley` and the embedded fonts |
 | `crates/render` | `Canvas`, CPU (`vello_cpu`) and GPU (`vello`) backends |

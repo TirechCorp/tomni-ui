@@ -134,8 +134,9 @@ Form::new("Conexões").density(Density::Compact).child(
 | `RadioButtons::bind(signal, opcoes)` | escolher uma entre poucas opções, todas à vista, ligado a um `Signal<String>` | `.header(prop)`, `.disabled(prop)` |
 | `Slider::bind(signal, 0..=100)` | um número numa faixa, ligado a um `Signal<f64>` | `.step(n)` (padrão 1), `.header(prop)`, `.disabled(prop)` |
 | `ProgressBar::new()` / `ProgressRing::new()` | andamento de uma tarefa; sem `.value`, indeterminado (animação contínua) | `.value(prop)` de 0 a 1; `.paused(prop)` e `.error(prop)` pintam com a cor do estado |
-| `AreaChart::new(serie)` / `Sparkline::new(serie)` | gráfico de área de um uso no tempo (CPU, memória, rede), como no Gerenciador de Tarefas; a `Sparkline` é a miniatura, sem grade | `.max(n)` (padrão 100), `.capacity(n)` (pontos à vista, padrão 60), `.color(Token::..)` |
+| `AreaChart::new(serie)` / `Sparkline::new(serie)` | gráfico de área de um uso no tempo (CPU, memória, rede), como no Gerenciador de Tarefas; a `Sparkline` é a miniatura, sem grade | `.max(n)` (padrão 100), `.capacity(n)` (pontos à vista, padrão 60), `.color(Token::..)`, `.secondary(serie)` e `.secondary_color(..)` (uma segunda série por cima, na mesma escala: o tempo de kernel) |
 | `LevelMeter::new(nivel)` | medidor de quadradinhos, do amarelo-claro ao vermelho-escuro, para um nível de 0 a 1 (a CPU na barra de título) | `.segments(n)` (padrão 10), `.on_click(move \|\| ...)` (vira botão), `.tooltip(prop)` |
+| `HeatMap::new(valores)` | mapa de calor: um ladrilho por valor, mais cheio de cor quanto maior (o uso de cada núcleo quando são dezenas ou centenas) | `.max(n)` (padrão 100), `.color(Token::..)`, `.cell_tooltip(\|n, valor\| ...)` (a dica do ladrilho sob o ponteiro) |
 | `Expander::new(cabecalho, signal_bool)` | seção recolhível (sanfona): o cabeçalho abre e fecha o conteúdo | `.content(view)`, `.description(texto)` |
 | `TabView::bind(signal)` | abas, ligadas a um `Signal<String>` com a chave da aba escolhida | `.tab(chave, titulo, view)` (uma por aba), `.items(lista, \|t\| chave, \|t\| titulo, \|t\| view)` (uma por item), `.on_close(move \|chave\| ...)` (o X), `.on_add(move \|\| ...)` (o "+"), `.on_reorder(move \|de, para\| ...)` (arrastar a aba), `.tab_context_flyout(\|chave\| MenuFlyout)` (menu de contexto da aba), `.tab_width(TabWidth::SizeToContent)` |
 | `NavigationView::bind(signal)` | painel de navegação à esquerda e a página do item escolhido ao lado; o signal guarda a chave do item | `.item(chave, Symbol::Home, rotulo, view)`, `.group(chave, icone, rotulo, \|g\| g.item(...))`, `.header(texto)`, `.footer_item(...)`, `.settings(view)`, `.search(AutoSuggestBox)`, `.pane_mode(NavigationMode::Compact)` |
@@ -538,12 +539,34 @@ Error}`); o anel é `Look::ProgressRing(v)`.
 `.capacity(..)` mais novos, com o mais novo na borda direita, na escala de 0 a `.max(..)`.
 Guarde a série num signal e limite o tamanho no app (`if s.len() > 60 { s.remove(0); }`). O
 `AreaChart` tem 160×100 de tamanho natural (use `.grow(1)` ou `.height(..)`), a `Sparkline`
-72×40. O `LevelMeter` acende `nivel × segmentos` quadradinhos; com `.on_click` recebe foco e
+72×40. `.secondary(serie)` desenha uma segunda série por cima da primeira, na mesma escala, com
+a linha e a área translúcida na `.secondary_color(..)` (o vermelho `SystemFillColorCritical`
+por padrão): o tempo de kernel embaixo da CPU, como no Gerenciador de Tarefas; vazia, some. O
+`Look::Chart(v)` traz `v.secondary`. O `LevelMeter` acende `nivel × segmentos` quadradinhos; com `.on_click` recebe foco e
 Enter, e precisa de `.height(44)` para o alvo de toque. Não são acessíveis só pela cor:
 mostre o número num `Text` ou no `.tooltip`. `app.value("id")` dá o nível do medidor e o
 ponto mais novo do gráfico (falha se a série está vazia); `app.look("id")` dá
 `Look::Chart(v)` (`v.kind`: `ChartKind::{Area, Sparkline}`) ou `Look::LevelMeter(v)`. Exemplo:
 `crates/tomni-ui/examples/desempenho.rs`.
+
+**`HeatMap`**: um ladrilho por valor (`Vec<f64>`, fixa, closure ou `Signal`), da esquerda para
+a direita e de cima para baixo, em colunas e linhas que deixam cada ladrilho o mais perto de
+quadrado e ocupam a área toda (`tomni_ui::heat_map_grid`); a cor vai de quase transparente (0)
+a cheia (`.max(..)`, 100 por padrão). É o que o Gerenciador de Tarefas mostra no lugar dos
+gráficos por núcleo quando a máquina tem muitos: 512 ladrilhos cabem onde 512 `AreaChart` não
+caberiam. Tem 160×100 de tamanho natural e encolhe com `.height(0).grow(1)`. O ladrilho sob o
+ponteiro ganha borda forte, e `.cell_tooltip(|n, valor| ...)` dá a dica dele (n começa em 0).
+Nos testes, `app.values("id")` dá os valores, e `tomni_ui::heat_map_cell(total, app.rect("id"), n)`
+o retângulo do ladrilho `n` (para `app.move_to(.. .center())`); a dica é o `"{id}-tooltip"`.
+`app.look("id")` dá `Look::HeatMap(v)`, com `v.hovered`.
+
+```rust
+HeatMap::new(move || nucleos.with(|s| s.iter().map(|h| h.last().copied().unwrap_or_default()).collect()))
+    .id("nucleos")
+    .cell_tooltip(|n, uso| format!("Processador {n}: {uso:.0}%"))
+    .height(0)
+    .grow(1)
+```
 
 **`Expander`**: o cabeçalho (48 px) abre e fecha com clique, Enter ou Espaço; o signal
 acompanha. Fechado, o conteúdo sai do layout e do Tab; o estado dele (texto digitado) fica.
@@ -2815,7 +2838,7 @@ As teclas: `Enter`, `Space`, `Tab`, `Escape`, `Backspace`, `Delete`, `Left`, `Ri
   escolhido no `NavigationView`; o rótulo de um item dele), `tab_titles(id)` (os títulos das
   abas do `TabView`, em ordem),
   `value(id)` (`f64` do `Slider` ou do `NumberBox`, o andamento de 0 a 1 da `ProgressBar`/`ProgressRing`, o
-  nível do `LevelMeter` ou o ponto mais novo do `AreaChart`/`Sparkline`; falha no indeterminado e na série vazia), `checked(id)` (`CheckBox` marcada, `ToggleButton` ou `ToggleSwitch` ligado, opção de rádio
+  nível do `LevelMeter` ou o ponto mais novo do `AreaChart`/`Sparkline`; falha no indeterminado e na série vazia), `values(id)` (a série inteira do `AreaChart`/`Sparkline` ou os valores do `HeatMap`), `checked(id)` (`CheckBox` marcada, `ToggleButton` ou `ToggleSwitch` ligado, opção de rádio
   escolhida, aba ou item do `NavigationView` escolhido), `visible(id)`, `enabled(id)`, `focused()` (id com foco),
   `rect(id)` (na janela, já com a rolagem; um `kurbo::Rect` com `x0`, `y0`, `x1` e `y1`),
   `in_view(id)` (`false` se rolado para fora), `scroll_offset(id)` e `scroll_content(id)` (do

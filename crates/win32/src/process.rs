@@ -77,6 +77,10 @@ pub struct ProcessUsage {
     pub read_bytes: u64,
     /// Os bytes escritos até agora, como em `read_bytes`.
     pub written_bytes: u64,
+    /// As operações de leitura até agora, contadas como os `read_bytes`.
+    pub read_operations: u64,
+    /// As operações de escrita até agora.
+    pub write_operations: u64,
     /// Quando o processo começou, em unidades de 100 ns desde 1601 (o `FILETIME`). Com o pid,
     /// diz se é o mesmo processo de uma leitura anterior (o Windows reaproveita os pids).
     pub start_time: u64,
@@ -128,6 +132,8 @@ pub fn process_usage(pid: u32) -> io::Result<ProcessUsage> {
         memory: contadores.WorkingSetSize as u64,
         read_bytes: es.ReadTransferCount,
         written_bytes: es.WriteTransferCount,
+        read_operations: es.ReadOperationCount,
+        write_operations: es.WriteOperationCount,
         start_time: (u64::from(criado.dwHighDateTime) << 32) | u64::from(criado.dwLowDateTime),
     })
 }

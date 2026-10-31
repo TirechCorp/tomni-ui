@@ -11,7 +11,7 @@ use kurbo::{Point, Rect, Size, Vec2};
 
 use crate::border::{BorderVisual, CardVisual};
 use crate::button::ButtonVisual;
-use crate::chart::{ChartVisual, LevelMeterVisual};
+use crate::chart::{ChartVisual, HeatMapVisual, LevelMeterVisual};
 use crate::checkbox::CheckBoxVisual;
 use crate::color::ThemeColor;
 use crate::combo_box::{ComboBoxItemVisual, ComboBoxVisual};
@@ -66,7 +66,7 @@ pub enum Within {
     message = "`{Self}` não é um widget do Tomni UI",
     label = "não é um widget",
     note = "widgets: `Form`, `Column`, `Row`, `UniformGrid`, `Border`, `Card`, `SettingsCard`, `SettingsExpander`, `ScrollViewer`, \
-            `Text`, `Icon`, `Image`, `Button`, `ToggleButton`, `Edit`, `TextEditor`, `CheckBox`, `ToggleSwitch`, `ComboBox`, `RadioButtons`, `Slider`, `ProgressBar`, `ProgressRing`, `AreaChart`, `Sparkline`, `LevelMeter`, \
+            `Text`, `Icon`, `Image`, `Button`, `ToggleButton`, `Edit`, `TextEditor`, `CheckBox`, `ToggleSwitch`, `ComboBox`, `RadioButtons`, `Slider`, `ProgressBar`, `ProgressRing`, `AreaChart`, `Sparkline`, `LevelMeter`, `HeatMap`, \
             `Expander`, `TabView`, `NavigationView`, `TreeView`, `DataGrid`, `PropertyGrid`, `AutoSuggestBox`, `NumberBox`, `InfoBar`, \
             `ContentDialog`, `DockHost`, `Show` \
             e `For` (`Flyout` e `MenuFlyout` vão no `Button::flyout`, a `TitleBar` no \
@@ -627,7 +627,7 @@ impl std::fmt::Debug for Slot {
     message = "`{Self}` não é uma view do Tomni UI",
     label = "não é um widget",
     note = "views: `Form`, `Column`, `Row`, `UniformGrid`, `Border`, `Card`, `SettingsCard`, `SettingsExpander`, `ScrollViewer`, \
-            `Text`, `Icon`, `Image`, `Button`, `ToggleButton`, `Edit`, `TextEditor`, `CheckBox`, `ToggleSwitch`, `ComboBox`, `RadioButtons`, `Slider`, `ProgressBar`, `ProgressRing`, `AreaChart`, `Sparkline`, `LevelMeter`, \
+            `Text`, `Icon`, `Image`, `Button`, `ToggleButton`, `Edit`, `TextEditor`, `CheckBox`, `ToggleSwitch`, `ComboBox`, `RadioButtons`, `Slider`, `ProgressBar`, `ProgressRing`, `AreaChart`, `Sparkline`, `LevelMeter`, `HeatMap`, \
             `Expander`, `TabView`, `NavigationView`, `TreeView`, `DataGrid`, `PropertyGrid`, `AutoSuggestBox`, `NumberBox`, `InfoBar`, \
             `ContentDialog`, `DockHost`, `Show` \
             e `For` (`Flyout` e `MenuFlyout` vão no `Button::flyout`, a `TitleBar` no \
@@ -921,6 +921,8 @@ pub enum Look {
     Chart(ChartVisual),
     /// `LevelMeter`.
     LevelMeter(LevelMeterVisual),
+    /// `HeatMap`.
+    HeatMap(HeatMapVisual),
     /// Expander: o cabeçalho, com a seta, e o painel do conteúdo quando aberto. O texto do
     /// cabeçalho e o conteúdo são filhos.
     Expander(ExpanderVisual),

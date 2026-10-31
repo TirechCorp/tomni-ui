@@ -83,8 +83,9 @@ pub use button::{
     ICON_BUTTON_SIZE, ICON_BUTTON_SIZE_COMPACT,
 };
 pub use chart::{
-    AreaChart, CHART_CAPACITY, ChartKind, ChartVisual, LEVEL_METER_SEGMENTS, LevelMeter,
-    LevelMeterVisual, Sparkline,
+    AreaChart, CHART_CAPACITY, ChartKind, ChartVisual, HEAT_MAP_GAP, HeatMap, HeatMapVisual,
+    LEVEL_METER_SEGMENTS, LevelMeter, LevelMeterVisual, Sparkline, heat_map_cell, heat_map_grid,
+    heat_map_index_at,
 };
 pub use checkbox::{CheckBox, CheckBoxVisual};
 pub use color::{Brush, Color, GradientStop, LinearGradient, ThemeColor, Token};

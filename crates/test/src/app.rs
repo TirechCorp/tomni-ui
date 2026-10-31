@@ -998,6 +998,20 @@ impl TestApp {
         }
     }
 
+    /// Os valores do `AreaChart`/`Sparkline` `id` (a série, do mais antigo ao mais novo) ou do
+    /// `HeatMap` `id` (um por ladrilho).
+    ///
+    /// # Panics
+    ///
+    /// Se `id` não for um gráfico nem um mapa de calor.
+    pub fn values(&self, id: &str) -> Vec<f64> {
+        match self.look(id) {
+            Look::Chart(visual) => visual.values,
+            Look::HeatMap(visual) => visual.values,
+            look => panic!("{id:?} não é um gráfico nem um HeatMap: {look:?}"),
+        }
+    }
+
     /// Valor do `Slider` ou do `NumberBox` `id`, o andamento da `ProgressBar`/`ProgressRing`
     /// `id`, de 0 a 1, o nível do `LevelMeter`, o ponto mais novo do `AreaChart`/`Sparkline`, ou
     /// o tamanho do primeiro painel do `Split` `id` (ou do divisor dele), em

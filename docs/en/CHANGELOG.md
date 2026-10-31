@@ -36,6 +36,24 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 - `tomni_ui_win32::process_usage(pid)`: a process's CPU time and memory on Windows.
 - `tomni-ui-macos`, the crate for the macOS calls with no safe API: `process_usage(pid)` (a
   process's CPU time and memory) and `child_pids(pid)` (its direct children).
+- `memory_status()` in `tomni-ui-win32` and `tomni-ui-macos`: the machine's physical memory,
+  with the total and the available amount (`MemoryStatus`), as Task Manager and Activity
+  Monitor show them.
+- `cpu_times()` in `tomni-ui-win32` and `tomni-ui-macos`: each logical core's user, kernel and
+  idle time (`CpuTimes`), for the per-core graph and the kernel time.
+- `network_interfaces()` in `tomni-ui-win32` and `tomni-ui-macos`: the bytes each network
+  interface received and sent, without the loopback one, with its state and whether it is
+  physical (`NetworkInterface`).
+- `disk_counters()` in `tomni-ui-win32` and `tomni-ui-macos`: each disk's operations and bytes
+  read and written (`DiskCounters`), and on Windows `ProcessUsage` gets `read_operations` and
+  `write_operations`.
+- `AreaChart` and `Sparkline` get `.secondary(series)` and `.secondary_color(..)`: a second
+  series over the first, on the same scale, red by default, like Task Manager's kernel time.
+- `HeatMap`: the heat map, one tile per value, filled with more color the higher it is, in
+  columns and rows that keep each tile as close to square as possible (`heat_map_grid`,
+  `heat_map_cell`, `heat_map_index_at`), with the tooltip of the tile under the pointer
+  (`.cell_tooltip`). It is what Task Manager shows instead of the per-core charts when there
+  are many. `TestApp::values(id)` gives a chart's series or the map's values.
 - The `Symbol::DataArea` icon.
 
 - `App::stall_log(path)` (and `WindowOptions::stall_log`): the stall log. A watchdog thread

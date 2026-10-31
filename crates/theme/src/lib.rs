@@ -49,7 +49,7 @@ use tomni_ui_core::{
     BUTTON_ICON_SIZE, BUTTON_ICON_SPACING, BorderVisual, ButtonState, ButtonVariant, ButtonVisual,
     CaptionButtonVisual, CardVisual, ChartVisual, CheckBoxVisual, ComboBoxItemVisual,
     ComboBoxVisual, CustomLook, DataGridHeaderVisual, DataGridRowVisual, DataGridVisual, Density,
-    DockSide, EditVisual, ExpanderVisual, FieldButtonVisual, ICON_BUTTON_SIZE,
+    DockSide, EditVisual, ExpanderVisual, FieldButtonVisual, HeatMapVisual, ICON_BUTTON_SIZE,
     ICON_BUTTON_SIZE_COMPACT, IconVisual, ImageVisual, InfoBarVisual, LevelMeterVisual, Look,
     MenuBarItemVisual, MenuItemVisual, NavigationItemVisual, PopupKind, ProgressVisual,
     PropertyGridCategoryVisual, PropertyGridRowVisual, PropertyGridSizerVisual, RadioButtonVisual,
@@ -308,6 +308,12 @@ pub trait Drawer {
     /// Pinta um medidor de nível.
     fn draw_level_meter(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: &LevelMeterVisual);
 
+    /// Tamanho natural de um mapa de calor.
+    fn measure_heat_map(&mut self, visual: &HeatMapVisual) -> Size;
+
+    /// Pinta um mapa de calor.
+    fn draw_heat_map(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: &HeatMapVisual);
+
     /// Pinta o fundo de um `Expander`: o cabeçalho, a seta e, aberto, o painel do conteúdo. O
     /// tamanho vem dos filhos.
     fn draw_expander(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: ExpanderVisual);
@@ -526,6 +532,7 @@ pub trait Drawer {
             Look::ProgressRing(_) => self.measure_progress_ring(),
             Look::Chart(visual) => self.measure_chart(visual),
             Look::LevelMeter(visual) => self.measure_level_meter(visual),
+            Look::HeatMap(visual) => self.measure_heat_map(visual),
             Look::TabHeader {
                 label,
                 visual,
@@ -701,6 +708,7 @@ pub trait Drawer {
             Look::ProgressRing(visual) => self.draw_progress_ring(canvas, rect, *visual),
             Look::Chart(visual) => self.draw_chart(canvas, rect, visual),
             Look::LevelMeter(visual) => self.draw_level_meter(canvas, rect, visual),
+            Look::HeatMap(visual) => self.draw_heat_map(canvas, rect, visual),
             Look::Expander(visual) => self.draw_expander(canvas, rect, *visual),
             Look::TabView(visual) => self.draw_tab_view(canvas, rect, visual),
             Look::TabHeader { label, visual, .. } => {
@@ -1411,6 +1419,14 @@ impl Drawer for FluentDrawer {
         chart::draw_level_meter(canvas, rect, visual, &self.tokens);
     }
 
+    fn measure_heat_map(&mut self, _: &HeatMapVisual) -> Size {
+        chart::measure_heat_map()
+    }
+
+    fn draw_heat_map(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: &HeatMapVisual) {
+        chart::draw_heat_map(canvas, rect, visual, &self.tokens);
+    }
+
     fn draw_expander(&mut self, canvas: &mut dyn Canvas, rect: Rect, visual: ExpanderVisual) {
         expander::draw(canvas, rect, visual, &self.tokens);
     }
@@ -1643,6 +1659,7 @@ impl Drawer for FluentDrawer {
             | Look::ProgressRing(_)
             | Look::Chart(_)
             | Look::LevelMeter(_)
+            | Look::HeatMap(_)
             | Look::FieldButton(_)
             | Look::Expander(_)
             | Look::TabView(_)

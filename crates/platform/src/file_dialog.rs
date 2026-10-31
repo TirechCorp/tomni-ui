@@ -4,7 +4,7 @@
 //! O diálogo roda numa thread própria, para não travar o loop de eventos, e a resposta volta
 //! por [`FileDialogAnswer::send`], que acorda o loop.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use tomni_ui_core::dialogs::{
     FileDialogAnswer, FileDialogKind, FileDialogRequest, FileDialogService,
@@ -13,18 +13,25 @@ use winit::window::Window;
 
 /// Quem mostra os diálogos do app, preso à janela dele.
 pub(crate) struct SystemFileDialogs {
-    window: Arc<Window>,
+    /// Fraca: segurar a janela aqui a manteria viva na tela depois de fechada, parada no último
+    /// quadro.
+    window: Weak<Window>,
 }
 
 impl SystemFileDialogs {
-    pub(crate) fn new(window: Arc<Window>) -> Self {
-        Self { window }
+    pub(crate) fn new(window: &Arc<Window>) -> Self {
+        Self {
+            window: Arc::downgrade(window),
+        }
     }
 }
 
 impl FileDialogService for SystemFileDialogs {
     fn show(&self, request: FileDialogRequest, answer: FileDialogAnswer) {
-        let mut dialog = rfd::AsyncFileDialog::new().set_parent(&*self.window);
+        let mut dialog = rfd::AsyncFileDialog::new();
+        if let Some(window) = self.window.upgrade() {
+            dialog = dialog.set_parent(&*window);
+        }
         if !request.title.is_empty() {
             dialog = dialog.set_title(&request.title);
         }

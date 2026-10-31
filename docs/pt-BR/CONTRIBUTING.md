@@ -75,7 +75,7 @@ de cada rede vêm do `gerar-fixtures.sh` da pasta correspondente.
 | Pasta | O quê |
 | --- | --- |
 | `crates/reactive` | signals (`reactive_graph`) |
-| `crates/core` | widgets, árvore, foco, eventos, `IntoProp` e o modelo da bandeja do sistema |
+| `crates/core` | widgets (os gráficos, o medidor e o mapa de calor em `chart.rs`), árvore, foco, eventos, `IntoProp` e o modelo da bandeja do sistema |
 | `crates/layout` | flex com `taffy` |
 | `crates/text` | `parley` e as fontes embutidas |
 | `crates/render` | `Canvas`, backends CPU (`vello_cpu`) e GPU (`vello`) |
