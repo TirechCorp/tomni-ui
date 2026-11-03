@@ -98,6 +98,7 @@ pub fn run_windows<H: Handler>(
     tomni_ui_core::native::clear_host();
     tomni_ui_core::dialogs::clear_service();
     tomni_ui_core::tray::clear_backend();
+    tomni_ui_core::notification::clear_backend();
     let error = runner.error.take();
     drop(runner);
     windows::reset();
@@ -230,12 +231,16 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> Runner<H, F> {
         options: WindowOptions,
         position: Option<(i32, i32)>,
     ) -> Result<(), Error> {
+        // As notificações levam o ícone, o `app_id` e o título da janela principal.
+        let identity = (handle == WindowHandle::main())
+            .then(|| (options.icon, options.app_id.clone(), options.title.clone()));
         let mut janela = Janela::open(event_loop, handle, handler, options, position)?;
-        if handle == WindowHandle::main() {
+        if let Some((icon, app_id, title)) = identity {
             tomni_ui_core::native::set_host(Rc::new(janela.window.clone()));
             janela.share_dialogs();
             #[cfg(not(target_os = "android"))]
             crate::tray::install();
+            crate::notification::install(icon, app_id.as_deref(), &title);
         }
         janela.make_surface(&mut self.gpu)?;
         let dark = janela.system_dark();
@@ -1149,8 +1154,8 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
                 }
                 if focused {
                     janela.share_dialogs();
-                    windows::set_active(handle);
                 }
+                windows::set_focused(handle, focused);
                 false
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {

@@ -350,6 +350,27 @@ fn aviso_de_foco_com_1004() {
 }
 
 #[test]
+fn aviso_de_foco_quando_a_janela_perde_o_foco_do_sistema() {
+    let (mut app, handle) = app();
+    app.click("console");
+    app.feed("console", "\x1b[?1004h");
+    assert!(untrack(|| tomni_ui::app_focused().get()));
+    // A pessoa foi para outro programa: o terminal com foco avisa, e o app sabe.
+    app.set_window_active(false);
+    assert_eq!(escrito(&handle), "\x1b[O");
+    assert!(!untrack(|| tomni_ui::app_focused().get()));
+    app.set_window_active(true);
+    assert_eq!(escrito(&handle), "\x1b[I");
+    assert!(untrack(|| tomni_ui::app_focused().get()));
+    // Sem o foco no terminal, a janela muda e o programa não fica sabendo.
+    app.click("depois");
+    assert_eq!(escrito(&handle), "\x1b[O");
+    app.set_window_active(false);
+    app.set_window_active(true);
+    assert_eq!(escrito(&handle), "");
+}
+
+#[test]
 fn com_relato_o_link_abre_com_ctrl_shift() {
     let aberto: Rc<RefCell<Vec<LinkHit>>> = Rc::default();
     let destino = aberto.clone();

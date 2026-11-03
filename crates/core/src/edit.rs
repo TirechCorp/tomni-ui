@@ -813,6 +813,7 @@ impl Edit {
             | Event::DragLeave
             | Event::Drop(_)
             | Event::DropOutside { .. }
+            | Event::WindowFocus(_)
             | Event::FilesDropped { .. } => false,
             Event::Text(typed) => {
                 if self.read_only {

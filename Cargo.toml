@@ -113,6 +113,11 @@ libc = "0.2.190"
 # Os dicionários do IOKit no `tomni-ui-macos` (os discos), na versão que o `Cargo.lock` já tinha.
 # MIT OR Apache-2.0.
 core-foundation = "0.10.1"
+# As notificações do sistema no `tomni-ui-macos` (o `UNUserNotificationCenter`), nas versões que
+# o `Cargo.lock` já tinha pelo `winit` e pelo `tray-icon`. MIT.
+objc2 = "0.6.5"
+block2 = "0.6.2"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSBundle", "NSString", "NSValue"] }
 # Chaves SSH: gerar, cifrar e ler; a mesma versão exata que o `russh` fixa, para não entrar
 # uma segunda cópia. Apache-2.0 OR MIT.
 ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = ["std", "crypto", "encryption", "ppk", "rand_core"] }

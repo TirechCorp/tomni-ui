@@ -70,6 +70,8 @@ struct State {
     /// Dono do signal da janela ativa: vive até o `reset`, não com a tela de uma janela.
     scope: Option<Scope>,
     active: Option<Signal<WindowHandle>>,
+    /// A janela com o foco do sistema agora; `None` quando a pessoa está em outro programa.
+    focused: Option<Signal<Option<WindowHandle>>>,
     /// O tema que o app fixou (`Some(true)` é o escuro) e que as janelas novas herdam.
     theme_override: Option<bool>,
     /// O pedido de troca de tema que a plataforma ainda não aplicou.
@@ -95,6 +97,7 @@ impl State {
             closing_all: false,
             scope: None,
             active: None,
+            focused: None,
             theme_override: None,
             theme_request: None,
         }
@@ -351,17 +354,25 @@ impl NewWindow {
     }
 }
 
-fn active_signal() -> Signal<WindowHandle> {
-    STATE.with_borrow_mut(|s| match s.active {
-        Some(active) => active,
-        None => {
+/// Os signals da janela ativa e da que tem o foco, criados juntos no escopo que vive até o
+/// `reset`.
+fn focus_signals() -> (Signal<WindowHandle>, Signal<Option<WindowHandle>>) {
+    STATE.with_borrow_mut(|s| match (s.active, s.focused) {
+        (Some(active), Some(focused)) => (active, focused),
+        _ => {
             let scope = Scope::detached();
-            let active = scope.run(|| signal(WindowHandle::MAIN));
+            let (active, focused) =
+                scope.run(|| (signal(WindowHandle::MAIN), signal(Some(WindowHandle::MAIN))));
             s.scope = Some(scope);
             s.active = Some(active);
-            active
+            s.focused = Some(focused);
+            (active, focused)
         }
     })
+}
+
+fn active_signal() -> Signal<WindowHandle> {
+    focus_signals().0
 }
 
 /// A janela com o foco do sistema, reativa: muda quando a pessoa clica em outra. Começa na
@@ -369,6 +380,14 @@ fn active_signal() -> Signal<WindowHandle> {
 pub fn active_window() -> Memo<WindowHandle> {
     let active = active_signal();
     memo(move || active.get())
+}
+
+/// Se alguma janela do app tem o foco do sistema, reativo: `false` enquanto a pessoa está em
+/// outro programa (ou com as janelas minimizadas). Começa `true`. É o que decide, por exemplo,
+/// se um aviso vira notificação do sistema.
+pub fn app_focused() -> Memo<bool> {
+    let focused = focus_signals().1;
+    memo(move || focused.get().is_some())
 }
 
 /// Registra o que a janela [`WindowHandle::current`] responde ao pedido de fechar (o botão da
@@ -517,6 +536,22 @@ pub fn set_active(handle: WindowHandle) {
         if active.get_untracked() != handle {
             active.set(handle);
         }
+    }
+}
+
+/// A janela `handle` ganhou (`true`) ou perdeu o foco do sistema: muda o [`app_focused`] (e,
+/// ao ganhar, o [`active_window`]). Perder o foco só conta se ela era a que o tinha: na troca
+/// entre duas janelas do app, a ordem dos eventos não importa.
+pub fn set_focused(handle: WindowHandle, focused: bool) {
+    let signal = focus_signals().1;
+    let now = signal.get_untracked();
+    if focused {
+        set_active(handle);
+        if now != Some(handle) {
+            signal.set(Some(handle));
+        }
+    } else if now == Some(handle) {
+        signal.set(None);
     }
 }
 

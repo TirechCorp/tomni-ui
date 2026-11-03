@@ -10,7 +10,8 @@
 //! `GetTokenInformation` e `LookupAccountSidW`); a memória da máquina, o
 //! `GlobalMemoryStatusEx`; o tempo de cada núcleo, o `NtQuerySystemInformation`; o tráfego das
 //! interfaces de rede, o `GetIfTable2`; e as operações de cada disco, o
-//! `IOCTL_DISK_PERFORMANCE`. A pesquisa não achou crate com API segura para nenhuma
+//! `IOCTL_DISK_PERFORMANCE`. As notificações do sistema (`Toasts`) gravam o nome e o ícone do
+//! app no registro (`RegCreateKeyExW`, `RegSetValueExW`). A pesquisa não achou crate com API segura para nenhuma
 //! delas, e o usuário aprovou o `unsafe` contido aqui em 19/10.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
@@ -29,6 +30,7 @@ mod memory;
 mod network;
 mod pipe;
 mod process;
+mod toast;
 mod window;
 
 #[cfg(test)]
@@ -43,6 +45,7 @@ pub use pipe::{named_pipe_client_pid, private_pipe};
 pub use process::{
     ProcessEntry, ProcessUsage, process_path, process_table, process_usage, process_user,
 };
+pub use toast::Toasts;
 pub use window::{CopyDataWindow, window_exists};
 
 use std::io;

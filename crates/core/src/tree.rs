@@ -2202,6 +2202,14 @@ impl Tree {
         }
     }
 
+    /// A janela ganhou (`true`) ou perdeu o foco do sistema: [`Event::WindowFocus`] ao widget com
+    /// foco.
+    pub fn window_focus(&mut self, active: bool) {
+        if let Some(id) = self.focus {
+            self.send(id, &Event::WindowFocus(active));
+        }
+    }
+
     /// Composição do IME, entregue ao widget com foco.
     pub fn ime(&mut self, ime: Ime) {
         if let Some(id) = self.focus {

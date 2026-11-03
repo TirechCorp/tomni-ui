@@ -2023,7 +2023,10 @@ pub fn tela() -> impl View {
   `progress()` é o `OSC 9;4` (`TermProgress::{None, Normal(u8), Error(Option<u8>),
   Indeterminate, Paused(Option<u8>)}`), `alerts()` conta os avisos (BEL, `OSC 9` com texto e
   `OSC 777;notify`, uma vez por bloco recebido), `last_notice()` é o último com texto
-  (`Notice { title, body }`), `attention()` diz se há aviso não visto e `mark_seen()` o apaga. O
+  (`Notice { title, body }`), `notices()` conta só os com texto (é o que vale para uma
+  notificação do sistema), `notify(Notice)` dá um aviso como se o programa o mandasse (para quem
+  sabe do programa por outro caminho, como um gancho), `attention()` diz se há aviso não visto e
+  `mark_seen()` o apaga. O
   `TerminalPanes` liga isso às abas sozinho: anel de progresso, ponto de atenção (que some ao
   escolher a aba, estando a janela com o foco) e o pedido de atenção da janela
   (`WindowHandle::request_attention()`) quando o aviso chega com a janela sem o foco.
@@ -2672,6 +2675,19 @@ fn secundaria(contador: Signal<i32>) -> impl View {
   Não há bandeja no Android. No teste: `app.tray()` (`Option<TrayState>` com `tooltip` e `items`,
   `None` sem bandeja), `app.tray_click("id")`, `app.tray_activate()` e
   `app.set_tray_available(false)`. O exemplo completo é `examples/bandeja.rs`.
+- **As notificações do sistema** (`tomni_ui::notification`):
+  `Notification::new("Título").body("texto").tag("grupo").on_click(|| ..).show()` mostra uma
+  notificação (o balão do Windows, a Central de Notificações do macOS, o
+  `org.freedesktop.Notifications` do Linux) e devolve o número dela; `notification::close(n)` a
+  tira. A de mesma `tag` toma o lugar da anterior (uma por aba, por exemplo). O `on_click` roda na
+  thread da interface; trazer a janela para a frente é do app (`WindowHandle::focus()`). O
+  cabeçalho mostra o nome de `notification::set_app_name("Meu App")` (chame antes do `App::run`;
+  sem ele, o título da janela principal) e o ícone do `App::icon`; o `App::app_id` casa a
+  notificação com o atalho `.desktop` no Linux. `notification::available()` diz se há backend.
+  No macOS só há notificações num `.app` (no `cargo run` elas somem); o sistema pergunta a
+  permissão na primeira. Não há no Android. Mostre só o que a pessoa não está vendo (a janela
+  sem foco), senão é barulho. No teste: `app.notifications()` (`Vec<NotificationState>` com
+  `title`, `body` e `tag`, as que estão à vista) e `app.notification_click("Título")`.
 - **Ícone e nome do app**: `App::icon(WindowIcon::new(PNG_GRANDE).with_small(PNG_PEQUENO))` (PNG
   ou SVG embutidos com `include_bytes!`; o SVG é rasterizado no tamanho de cada uso) vale para a
   janela, a barra de tarefas e as janelas que o app abrir; `App::app_id("meu-app")` é o nome com
@@ -2685,6 +2701,10 @@ fn secundaria(contador: Signal<i32>) -> impl View {
   interface `com.canonical.Unity.LauncherEntry`. Só envia quando o estado muda, não faz nada sem
   barramento de sessão (nem fora do Linux) e só aparece se existir o `.desktop`.
 - **`active_window()`** é um `Memo<WindowHandle>` com a janela com o foco do sistema.
+  **`app_focused()`** é um `Memo<bool>`: `false` enquanto a pessoa está em outro programa (é o
+  que decide se um aviso vira notificação). O widget com foco recebe `Event::WindowFocus(bool)`
+  quando a janela perde ou ganha o foco do sistema; o `Terminal` repassa ao programa que pediu
+  `ESC[?1004h`.
 - **`on_close_requested(|| bool)`** roda quando a janela vai fechar (botão da `TitleBar`, Alt+F4,
   o sistema, `.close()`); `false` cancela. Fechar a **principal** pergunta a todas as janelas e,
   se nenhuma recusar, fecha todas e encerra o app: é também o gancho de saída (salvar o estado).

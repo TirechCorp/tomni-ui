@@ -104,7 +104,8 @@ pub mod prelude {
         Shortcut, Show, Slider, SortDirection, Span, Sparkline, SpinButtons, Split, Stretch,
         Symbol, TabProgress, TabView, TabWidth, Text, TextEditor, TextEditorController, TextRamp,
         ThemeColor, TitleBadge, TitleBar, ToggleButton, ToggleSwitch, Token, TreeItem, TreeItems,
-        TreeView, UniformGrid, View, WindowHandle, active_window, on_close_requested, open_window,
+        TreeView, UniformGrid, View, WindowHandle, active_window, app_focused, on_close_requested,
+        open_window,
     };
     #[cfg(feature = "markdown")]
     pub use tomni_ui_markdown::MarkdownView;

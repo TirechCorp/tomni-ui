@@ -7,6 +7,19 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Added
 
+- `tomni_ui::notification`: desktop notifications.
+  `Notification::new(title).body(text).tag(group).on_click(f).show()`, with `close`,
+  `available` and `set_app_name`; one with the same `tag` replaces the previous one and the
+  click runs on the UI thread. On Linux through `org.freedesktop.Notifications` (D-Bus), on
+  Windows through the system notifications (`tomni_ui_win32::Toasts`) and on macOS through
+  `UNUserNotificationCenter` (`tomni_ui_macos::Notifications`, only inside a `.app`).
+  `TestApp::notifications()` and `notification_click(title)` for tests.
+- `app_focused()`: `false` while the user is in another program. The
+  `Event::WindowFocus(bool)` event reaches the focused widget when the window gains or loses
+  the system focus, and the `Terminal` also tells the program that asked for `ESC[?1004h` in
+  that case.
+- `Session::notices()` (reactive, the program's notices with text) and
+  `Session::notify(Notice)` (a notice on the tab as if it came from the program).
 - `tomni-ui-nebula`: Nebula metrics (`stats` in the config), with the same names as official
   Nebula. `stats.type: graphite` sends the lines to Graphite over TCP every `stats.interval`;
   `stats.type: prometheus` opens an HTTP endpoint at `stats.listen` and `stats.path` for

@@ -43,6 +43,7 @@ mod info_bar;
 mod menu_bar;
 pub mod native;
 mod navigation_view;
+pub mod notification;
 mod number_box;
 mod press;
 pub mod process;
@@ -188,7 +189,7 @@ pub use widget::{
     Placement, PopupKind, Slot, View, Widget, Within,
 };
 pub use windows::{
-    NewWindow, WindowGeometry, WindowHandle, active_window, closing_all_windows,
+    NewWindow, WindowGeometry, WindowHandle, active_window, app_focused, closing_all_windows,
     on_close_requested, open_window,
 };
 

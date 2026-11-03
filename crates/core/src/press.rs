@@ -122,6 +122,7 @@ impl Pressable {
             | Event::DragLeave
             | Event::Drop(_)
             | Event::DropOutside { .. }
+            | Event::WindowFocus(_)
             | Event::FilesDropped { .. } => (false, false),
         }
     }

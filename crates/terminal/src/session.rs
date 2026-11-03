@@ -147,6 +147,8 @@ pub(crate) struct SessionCore {
     seen: Option<Signal<u64>>,
     /// O último aviso que veio com texto.
     last_notice: Option<Signal<Option<Notice>>>,
+    /// Quantos avisos com texto chegaram (os do programa e os do [`Session::notify`]).
+    notices: Option<Signal<u64>>,
     /// Quantas vezes tocou a campainha: o widget compara para acender o lampejo.
     pub(crate) bell: u64,
     /// O diretório que o programa informou pelo `OSC 7`; some quando a sessão reabre.
@@ -203,6 +205,7 @@ impl SessionCore {
             alerts: None,
             seen: None,
             last_notice: None,
+            notices: None,
             bell: 0,
             cwd: None,
             clipboard_out: Vec::new(),
@@ -358,11 +361,21 @@ impl SessionCore {
         }
         self.clipboard_out.extend(self.emulator.take_clipboard());
         let notices = self.emulator.take_notices();
-        if let Some(last) = notices.last().cloned() {
-            self.raise_alerts(notices.len() as u64);
-            if let Some(signal) = self.last_notice {
-                signal.set(Some(last));
-            }
+        self.push_notices(notices);
+    }
+
+    /// Conta os avisos com texto e guarda o último.
+    fn push_notices(&mut self, notices: Vec<Notice>) {
+        let Some(last) = notices.last().cloned() else {
+            return;
+        };
+        let count = notices.len() as u64;
+        self.raise_alerts(count);
+        if let Some(signal) = self.notices {
+            signal.set(signal.get_untracked() + count);
+        }
+        if let Some(signal) = self.last_notice {
+            signal.set(Some(last));
         }
     }
 
@@ -492,8 +505,8 @@ impl Session {
             let id = registry.next;
             let mut core = SessionCore::new(transport, format!("sessao-{id}"));
             let scope = registry.scope.get_or_insert_with(Scope::detached);
-            let (title, closed, connecting, progress, alerts, seen, last_notice, selected) = scope
-                .run(|| {
+            let (title, closed, connecting, progress, alerts, seen, last_notice, notices, selected) =
+                scope.run(|| {
                     (
                         signal(core.key.clone()),
                         signal(false),
@@ -502,6 +515,7 @@ impl Session {
                         signal(0_u64),
                         signal(0_u64),
                         signal(None),
+                        signal(0_u64),
                         signal(false),
                     )
                 });
@@ -512,6 +526,7 @@ impl Session {
             core.alerts = Some(alerts);
             core.seen = Some(seen);
             core.last_notice = Some(last_notice);
+            core.notices = Some(notices);
             core.selected = Some(selected);
             registry.sessions.insert(id, Rc::new(RefCell::new(core)));
             Self(id)
@@ -685,6 +700,23 @@ impl Session {
         self.core()
             .and_then(|core| core.borrow().last_notice)
             .and_then(|signal| signal.get())
+    }
+
+    /// Quantos avisos com texto chegaram até agora: os `OSC 9` e `OSC 777;notify` do programa e
+    /// os de [`notify`](Self::notify). O BEL não entra. Só cresce; quem quer reagir a cada aviso
+    /// novo (uma notificação do sistema) compara com o que viu antes. Reativo.
+    pub fn notices(&self) -> u64 {
+        self.core()
+            .and_then(|core| core.borrow().notices)
+            .map_or(0, |signal| signal.get())
+    }
+
+    /// Dá um aviso em nome da sessão, como se o programa tivesse mandado um `OSC 777;notify`:
+    /// sobe [`alerts`](Self::alerts) e [`notices`](Self::notices), vira o
+    /// [`last_notice`](Self::last_notice) e acende a [`attention`](Self::attention). Para quem
+    /// sabe do programa por outro caminho (um gancho que ele chama ao terminar).
+    pub fn notify(&self, notice: Notice) {
+        self.with(|core| core.push_notices(vec![notice]));
     }
 
     /// O motivo do encerramento, se a conexão disse um (o mesmo texto do "[conexão encerrada: …]"
@@ -1368,6 +1400,40 @@ mod tests {
         assert_eq!(s.alerts(), 6);
         assert_eq!(s.last_notice().unwrap().body, "b");
         s.dispose();
+    }
+
+    #[test]
+    fn so_os_avisos_com_texto_contam_nas_notices() {
+        let s = Session::new(Loopback::new());
+        s.feed(b"\x07");
+        assert_eq!(s.notices(), 0, "o BEL não tem texto");
+        s.feed(b"\x1b]9;a\x07\x1b]777;notify;T;b\x07");
+        assert_eq!(s.notices(), 2);
+        s.dispose();
+    }
+
+    #[test]
+    fn notify_da_o_aviso_como_o_programa_daria() {
+        let s = Session::new(Loopback::new());
+        s.mark_seen();
+        assert!(!s.attention());
+        s.notify(Notice {
+            title: Some("Claude".into()),
+            body: "Terminou".into(),
+        });
+        assert_eq!((s.alerts(), s.notices()), (1, 1));
+        assert!(s.attention());
+        let aviso = s.last_notice().unwrap();
+        assert_eq!(
+            (aviso.title.as_deref(), aviso.body.as_str()),
+            (Some("Claude"), "Terminou")
+        );
+        s.dispose();
+        s.notify(Notice {
+            title: None,
+            body: "depois de fechada".into(),
+        });
+        assert_eq!(s.notices(), 0, "sessão descartada não conta");
     }
 
     #[test]

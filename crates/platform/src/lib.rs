@@ -55,6 +55,7 @@ mod frames;
 mod icon;
 pub mod keys;
 mod launcher;
+mod notification;
 #[cfg(not(target_os = "android"))]
 mod placement;
 mod render_guard;

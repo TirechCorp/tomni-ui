@@ -1753,6 +1753,14 @@ impl Terminal {
                 }
                 true
             }
+            Event::WindowFocus(active) => {
+                // Com o foco no terminal, a janela que perde o foco do sistema é o terminal que
+                // perde o foco para o programa (`ESC[?1004h`).
+                if self.focused {
+                    self.report_focus(*active);
+                }
+                false
+            }
             Event::KeyDown(key) => {
                 self.focus_ring = self.focus_ring || *key == Key::Tab;
                 if *key == Key::Other {

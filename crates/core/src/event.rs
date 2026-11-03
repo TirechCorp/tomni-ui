@@ -243,6 +243,10 @@ pub enum Event {
     FocusIn(FocusSource),
     /// O widget perdeu o foco.
     FocusOut,
+    /// A janela ganhou (`true`) ou perdeu (`false`) o foco do sistema, com o foco no widget: a
+    /// pessoa foi para outro programa, ou voltou. O foco do widget dentro da janela não muda. O
+    /// terminal usa para avisar o programa que pediu (`ESC[?1004h`).
+    WindowFocus(bool),
     /// Roda do mouse com o ponteiro sobre o widget que tem o foco, antes de rolar a tela. O
     /// `NumberBox` usa para mudar o valor; quem não consome deixa a roda rolar.
     Wheel {

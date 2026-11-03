@@ -13,7 +13,8 @@
 //! contido aqui em 29/10. A aba Disco lê as `Statistics` de cada `IOBlockStorageDriver` pelo
 //! IOKit (`IOServiceGetMatchingServices`, `IORegistryEntryGetParentEntry` e
 //! `IORegistryEntryCreateCFProperties`, declaradas aqui), com os dicionários pelo
-//! `core-foundation`.
+//! `core-foundation`. As notificações do sistema (`Notifications`) falam com o
+//! `UNUserNotificationCenter` pelo `msg_send!` do `objc2`, com um delegate próprio para o clique.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
 //! operação insegura, e nenhuma função pública do crate é `unsafe`.
@@ -26,6 +27,7 @@ mod cpu;
 mod disk;
 mod memory;
 mod network;
+mod notification;
 mod process;
 
 #[cfg(test)]
@@ -35,6 +37,7 @@ pub use cpu::{CpuTimes, cpu_times};
 pub use disk::{DiskCounters, disk_counters};
 pub use memory::{MemoryStatus, memory_status};
 pub use network::{NetworkInterface, network_interfaces};
+pub use notification::Notifications;
 pub use process::{
     DiskUsage, ProcessInfo, ProcessState, ProcessUsage, all_pids, child_pids, process_info,
     process_path, process_usage, user_name,

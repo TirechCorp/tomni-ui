@@ -600,6 +600,8 @@ impl Ui {
         tomni_ui_core::dialogs::deliver();
         // Os cliques na bandeja do sistema também.
         tomni_ui_core::tray::deliver();
+        // E os cliques nas notificações do sistema.
+        tomni_ui_core::notification::deliver();
         tomni_ui_core::clipboard::flush(self.tree.clipboard_mut());
         let efeitos = stages::stage("efeitos");
         loop {
@@ -732,11 +734,13 @@ impl Ui {
         self.tree.window_state().is_some()
     }
 
-    /// A janela ganhou (`true`) ou perdeu o foco do sistema: a `TitleBar` apaga quando inativa.
+    /// A janela ganhou (`true`) ou perdeu o foco do sistema: a `TitleBar` apaga quando inativa, e
+    /// o widget com foco recebe [`Event::WindowFocus`](tomni_ui_core::Event::WindowFocus).
     pub fn set_window_active(&mut self, active: bool) {
         if let Some(state) = self.tree.window_state() {
             state.set_active(active);
         }
+        self.tree.window_focus(active);
     }
 
     /// A janela foi maximizada (`true`) ou restaurada: muda o glifo do maximizar e desliga o
@@ -961,7 +965,10 @@ impl Ui {
 
     /// Quanto falta para uma dica abrir, se houver uma em contagem.
     pub fn deadline(&self) -> Option<std::time::Duration> {
-        if tomni_ui_core::dialogs::has_answer() || tomni_ui_core::tray::has_event() {
+        if tomni_ui_core::dialogs::has_answer()
+            || tomni_ui_core::tray::has_event()
+            || tomni_ui_core::notification::has_event()
+        {
             return Some(std::time::Duration::ZERO);
         }
         self.tree.deadline()
@@ -976,6 +983,9 @@ impl Ui {
         }
         if tomni_ui_core::tray::has_event() {
             return Some("evento da bandeja".into());
+        }
+        if tomni_ui_core::notification::has_event() {
+            return Some("clique numa notificação".into());
         }
         self.tree.deadline_reason()
     }

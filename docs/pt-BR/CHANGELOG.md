@@ -7,6 +7,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- `tomni_ui::notification`: as notificações do sistema.
+  `Notification::new(título).body(texto).tag(grupo).on_click(f).show()`, com `close`,
+  `available` e `set_app_name`; a de mesma `tag` toma o lugar da anterior e o clique roda na
+  thread da interface. No Linux pelo `org.freedesktop.Notifications` (D-Bus), no Windows pelas
+  notificações do sistema (`tomni_ui_win32::Toasts`) e no macOS pelo
+  `UNUserNotificationCenter` (`tomni_ui_macos::Notifications`, só num `.app`).
+  `TestApp::notifications()` e `notification_click(título)` para os testes.
+- `app_focused()`: `false` enquanto a pessoa está em outro programa. O evento
+  `Event::WindowFocus(bool)` chega ao widget com foco quando a janela ganha ou perde o foco do
+  sistema, e o `Terminal` avisa o programa que pediu o `ESC[?1004h` também nesse caso.
+- `Session::notices()` (reativo, os avisos com texto do programa) e `Session::notify(Notice)`
+  (um aviso na aba como se viesse do programa).
 - `tomni-ui-nebula`: as métricas do Nebula (`stats` no config), com os mesmos nomes do Nebula
   oficial. `stats.type: graphite` manda as linhas ao Graphite por TCP a cada `stats.interval`;
   `stats.type: prometheus` abre um HTTP em `stats.listen` e `stats.path` para o Prometheus ler.

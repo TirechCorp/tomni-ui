@@ -8,6 +8,7 @@ use std::rc::Rc;
 use tomni_ui::dialogs::{FileDialogAnswer, FileDialogRequest, FileDialogService};
 use tomni_ui::kurbo::{Point, Rect, Vec2};
 use tomni_ui::lint::{Issue, Severity};
+use tomni_ui::notification::{NotificationBackend, NotificationState};
 use tomni_ui::reactive::untrack;
 use tomni_ui::render::Pixmap;
 use tomni_ui::terminal::cell::Cell;
@@ -170,6 +171,34 @@ impl std::fmt::Debug for FakeTray {
     }
 }
 
+/// As notificações do sistema, falsas: as que estão à vista, pelo número.
+#[derive(Default)]
+struct FakeNotifications {
+    shown: RefCell<std::collections::BTreeMap<u64, NotificationState>>,
+}
+
+impl NotificationBackend for FakeNotifications {
+    fn show(&self, id: u64, state: &NotificationState) {
+        let mut shown = self.shown.borrow_mut();
+        if state.tag.is_some() {
+            shown.retain(|_, s| s.tag != state.tag);
+        }
+        shown.insert(id, state.clone());
+    }
+
+    fn close(&self, id: u64) {
+        self.shown.borrow_mut().remove(&id);
+    }
+}
+
+impl std::fmt::Debug for FakeNotifications {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FakeNotifications")
+            .field("shown", &self.shown.borrow().len())
+            .finish()
+    }
+}
+
 /// Tamanho padrão da janela de teste.
 const DEFAULT_SIZE: (u32, u32) = (400, 300);
 
@@ -208,6 +237,8 @@ pub struct TestApp {
     file_dialogs: Rc<FakeFileDialogs>,
     /// A bandeja falsa, instalada em `tray` desta thread.
     tray: Rc<FakeTray>,
+    /// As notificações falsas, instaladas em `notification` desta thread.
+    notifications: Rc<FakeNotifications>,
     /// A janela de `ui`.
     current: WindowHandle,
     /// As janelas que não são a atual (as abertas por `open_window`).
@@ -262,6 +293,9 @@ impl TestApp {
         // principal abrir.
         let tray = Rc::new(FakeTray::default());
         tomni_ui::tray::set_backend(tray.clone(), true);
+        tomni_ui::notification::reset();
+        let notifications = Rc::new(FakeNotifications::default());
+        tomni_ui::notification::set_backend(notifications.clone());
         let mut ui = Ui::new(width, height, FluentDrawer::new(Theme::Light), view);
         ui.repaints_since_last();
         windows::set_geometry(
@@ -277,6 +311,7 @@ impl TestApp {
             requests: Vec::new(),
             file_dialogs,
             tray,
+            notifications,
             current: WindowHandle::main(),
             others: Vec::new(),
             attentions: Vec::new(),
@@ -478,6 +513,70 @@ impl TestApp {
             .next()
             .expect("o app não mostra nenhuma bandeja");
         (*id, state.clone())
+    }
+
+    /// As notificações do sistema à vista agora, da mais antiga para a mais nova. A que foi
+    /// substituída por outra do mesmo grupo, fechada pelo app ou clicada já não aparece.
+    ///
+    /// ```
+    /// use tomni_ui::prelude::*;
+    /// use tomni_ui::notification::Notification;
+    /// use tomni_ui_test::TestApp;
+    ///
+    /// let mut app = TestApp::new(|| {
+    ///     let n = signal(0);
+    ///     let avisar = move || {
+    ///         let _ = Notification::new("Somou")
+    ///             .on_click(move || n.update(|n| *n += 10))
+    ///             .show();
+    ///     };
+    ///     Form::new("Contador").child(
+    ///         Button::new(move || format!("Cliques: {}", n.get()))
+    ///             .id("rotulo")
+    ///             .on_click(avisar),
+    ///     )
+    /// });
+    /// app.click("rotulo");
+    /// assert_eq!(app.notifications()[0].title, "Somou");
+    /// app.notification_click("Somou");
+    /// assert_eq!(app.label("rotulo"), "Cliques: 10");
+    /// assert!(app.notifications().is_empty());
+    /// ```
+    pub fn notifications(&self) -> Vec<NotificationState> {
+        self.notifications
+            .shown
+            .borrow()
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Clica na notificação à vista com o título `title` (a mais nova, se houver mais de uma).
+    /// Ela sai da vista, como no sistema.
+    ///
+    /// # Panics
+    ///
+    /// Se nenhuma notificação à vista tem esse título.
+    pub fn notification_click(&mut self, title: &str) -> &mut Self {
+        let id = {
+            let mut shown = self.notifications.shown.borrow_mut();
+            let id = shown
+                .iter()
+                .rev()
+                .find(|(_, s)| s.title == title)
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "nenhuma notificação com o título {title:?}; há {:?}",
+                        shown.values().map(|s| s.title.as_str()).collect::<Vec<_>>()
+                    )
+                });
+            shown.remove(&id);
+            id
+        };
+        tomni_ui::notification::sender().clicked(id);
+        self.step();
+        self
     }
 
     /// Roda um frame sem evento nenhum.
@@ -695,7 +794,7 @@ impl TestApp {
         if !handle.is_open() {
             return self;
         }
-        windows::set_active(handle);
+        windows::set_focused(handle, true);
         self.ui.set_window_active(self.current == handle);
         for slot in &mut self.others {
             slot.ui.set_window_active(slot.handle == handle);
@@ -890,8 +989,10 @@ impl TestApp {
     }
 
     /// Ativa ou desativa a janela (o foco em outro app) e roda um frame: inativa, a
-    /// `TitleBar` fica apagada.
+    /// `TitleBar` fica apagada, o [`app_focused`](tomni_ui::app_focused) vira `false` e o
+    /// widget com foco recebe o `Event::WindowFocus`.
     pub fn set_window_active(&mut self, active: bool) -> &mut Self {
+        windows::set_focused(self.current, active);
         self.ui.set_window_active(active);
         self.step();
         self
