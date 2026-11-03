@@ -10,6 +10,7 @@ use tokio::time::Instant;
 use super::{Cached, Engine, Key, ROAMING_SUPPRESS, Via};
 use crate::cert::CertError;
 use crate::header::{self, Header, MessageType};
+use crate::stats;
 use crate::tunnel::DecryptError;
 use crate::underlay::Underlay;
 use crate::util::now_unix;
@@ -19,13 +20,18 @@ impl<U: Underlay> Engine<U> {
     pub(super) fn on_udp(&mut self, pacote: &[u8], de: SocketAddr) {
         // Os pacotes de punch têm um byte só e não têm cabeçalho: caem aqui.
         let Some(h) = Header::parse(pacote) else {
+            if pacote.len() > 1 {
+                self.metrics.inc(stats::RX_INVALID);
+            }
             return;
         };
         if h.version != header::VERSION {
+            self.metrics.inc(stats::RX_INVALID);
             return;
         }
         // Um pacote "de dentro da rede" vindo do underlay seria o túnel passando por dentro dele.
         if self.in_my_networks(de.ip()) {
+            self.metrics.inc(stats::RX_INVALID);
             return;
         }
         self.on_outside(pacote, h, Via::Udp(de));
@@ -33,6 +39,7 @@ impl<U: Underlay> Engine<U> {
 
     /// Um pacote do Nebula, direto do UDP ou de dentro de um pacote de relay.
     pub(super) fn on_outside(&mut self, pacote: &[u8], h: Header, via: Via) {
+        self.metrics.rx(h.kind, h.subtype);
         match h.kind {
             MessageType::Handshake => self.on_handshake(pacote, via, h),
             MessageType::RecvError => {
@@ -92,6 +99,7 @@ impl<U: Underlay> Engine<U> {
     /// "Não conheço esse índice": o cabeçalho de 16 bytes, sem carga.
     fn send_recv_error(&self, para: SocketAddr, indice: u32) {
         let cabecalho = header::encode(MessageType::RecvError, 0, indice, 0);
+        self.metrics.tx(MessageType::RecvError, 0);
         self.raw_send(&cabecalho, para);
     }
 
@@ -229,9 +237,13 @@ impl<U: Underlay> Engine<U> {
             return false;
         }
         let Some(pacote) = host.tunnel.encrypt(tipo, subtipo, host.remote_index, carga) else {
+            if host.tunnel.exhausted() {
+                self.metrics.inc(stats::TX_EXHAUSTED);
+            }
             return false;
         };
         host.out_traffic = true;
+        self.metrics.tx(tipo, subtipo);
         match host.remote {
             Some(remoto) => {
                 self.raw_send(&pacote, remoto);

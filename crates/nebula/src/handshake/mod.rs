@@ -9,7 +9,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::cert::{Certificate, Curve, Version};
+use crate::cert::{CertError, Certificate, Curve, Version};
 use crate::config::Credentials;
 use crate::header::{self, Header, MessageType};
 use crate::noise::{DataCipher, Ix, NoiseError};
@@ -100,6 +100,9 @@ pub(crate) struct HandshakeError {
     pub(crate) fatal: bool,
     /// O motivo, em português (a frase continua depois de "recusou o handshake: ").
     pub(crate) reason: String,
+    /// O certificado do outro nó está na lista de bloqueio (a métrica
+    /// `handshake_manager.rejected.blocklisted`).
+    pub(crate) blocklisted: bool,
 }
 
 impl HandshakeError {
@@ -107,6 +110,7 @@ impl HandshakeError {
         HandshakeError {
             fatal: true,
             reason: motivo.into(),
+            blocklisted: false,
         }
     }
 
@@ -114,6 +118,7 @@ impl HandshakeError {
         HandshakeError {
             fatal: false,
             reason: motivo.into(),
+            blocklisted: false,
         }
     }
 }
@@ -420,7 +425,10 @@ impl Machine {
         self.creds
             .pool
             .verify(&remoto, segundos)
-            .map_err(|erro| HandshakeError::fatal(erro.to_string()))?;
+            .map_err(|erro| HandshakeError {
+                blocklisted: matches!(erro, CertError::Blocklisted { .. }),
+                ..HandshakeError::fatal(erro.to_string())
+            })?;
 
         if remoto.networks().is_empty() {
             return Err(HandshakeError::fatal(

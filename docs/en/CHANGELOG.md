@@ -7,6 +7,13 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Added
 
+- `tomni-ui-nebula`: Nebula metrics (`stats` in the config), with the same names as official
+  Nebula. `stats.type: graphite` sends the lines to Graphite over TCP every `stats.interval`;
+  `stats.type: prometheus` opens an HTTP endpoint at `stats.listen` and `stats.path` for
+  Prometheus to scrape. `stats.message_metrics` and `stats.lighthouse_metrics` turn on the
+  per-message-type counters. `Config::stats` (`Stats`, `StatsExport`, `GraphiteProtocol`) holds
+  what was read and `Nebula::stats_addr()` tells where the HTTP endpoint opened. A `stats` with
+  an error stops the node from starting, as in Nebula; before, it was ignored with a warning.
 - `tomni-ui-nebula`: Nebula relays, compatible with official Nebula (v1 and v2 certificates).
   With `relay.relays` the node accepts being reached through the listed relays, and with
   `relay.use_relays` it reaches peers through the relays they announce; this is the path when

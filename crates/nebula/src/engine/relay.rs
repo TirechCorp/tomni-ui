@@ -171,6 +171,9 @@ impl<U: Underlay> Engine<U> {
 
     /// Responde por onde o pacote chegou. Pelo relay, ele passa a valer: o par já o usou.
     pub(super) fn reply(&mut self, via: Via, bytes: &[u8]) {
+        // Só o aperto de mão responde assim.
+        self.metrics
+            .tx(MessageType::Handshake, header::HANDSHAKE_IX_PSK0);
         match via {
             Via::Udp(de) => self.raw_send(bytes, de),
             Via::Relay { host, relay, .. } => {

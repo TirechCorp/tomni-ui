@@ -29,6 +29,7 @@ use crate::config::{Config, Credentials, StaticMapNetwork};
 use crate::handshake::Machine;
 use crate::header::MessageType;
 use crate::remotes::RemoteList;
+use crate::stats::{self, Metrics, Sample, Value};
 use crate::timers::Timers;
 use crate::tunnel::Tunnel;
 use crate::underlay::Underlay;
@@ -92,6 +93,8 @@ pub(crate) enum Command {
     Stop(oneshot::Sender<()>),
     /// Lista os túneis.
     Tunnels(oneshot::Sender<Vec<TunnelInfo>>),
+    /// As métricas agora (`stats`).
+    Metrics(oneshot::Sender<Vec<Sample>>),
 }
 
 /// O que chega das tarefas que resolvem nomes.
@@ -144,6 +147,8 @@ pub(crate) struct Pending {
     pub(crate) last_remotes: Vec<SocketAddr>,
     pub(crate) last_error: Option<String>,
     pub(crate) sent_any: bool,
+    /// Quando o aperto de mão começou (para o histograma `handshakes`).
+    pub(crate) started: Instant,
 }
 
 /// O papel de um relay num túnel: este nó é uma das pontas, ou passa os pacotes adiante.
@@ -290,6 +295,8 @@ pub(crate) struct Engine<U: Underlay> {
     state_tx: watch::Sender<State>,
     state: State,
     notifier: Option<Arc<dyn Fn(State) + Send + Sync>>,
+    /// Os contadores do `stats` (nada é guardado sem ele).
+    pub(crate) metrics: Metrics,
 }
 
 /// Os nanossegundos desde 1970, que o aperto de mão carrega.
@@ -323,6 +330,7 @@ pub(crate) fn spawn<U: Underlay>(params: Params<U>) -> io::Result<Handles> {
         }
     }
     let lighthouses: HashSet<IpAddr> = params.cfg.lighthouse.hosts.iter().copied().collect();
+    let metrics = Metrics::new(params.cfg.stats.as_ref());
     let engine = Engine {
         cfg: params.cfg,
         creds: params.creds,
@@ -349,6 +357,7 @@ pub(crate) fn spawn<U: Underlay>(params: Params<U>) -> io::Result<Handles> {
         state_tx,
         state: State::Connecting,
         notifier: params.notifier,
+        metrics,
     };
     let receivers = Receivers {
         commands: commands_rx,
@@ -415,6 +424,9 @@ impl<U: Underlay> Engine<U> {
                     }
                     Some(Command::Tunnels(resposta)) => {
                         let _ = resposta.send(self.tunnels());
+                    }
+                    Some(Command::Metrics(resposta)) => {
+                        let _ = resposta.send(self.metrics_snapshot());
                     }
                     None => {
                         self.stop();
@@ -556,9 +568,51 @@ impl<U: Underlay> Engine<U> {
         lista
     }
 
+    /// As métricas agora: os contadores e, como no `EmitStats` do Nebula, os medidores do
+    /// mapa de túneis e do certificado.
+    fn metrics_snapshot(&self) -> Vec<Sample> {
+        let mut lista = self.metrics.snapshot();
+        let tamanho = |n: usize| Value::Gauge(i64::try_from(n).unwrap_or(i64::MAX));
+        let cert = self.creds.default_cert();
+        let medidores = [
+            ("hostmap.main.hosts", tamanho(self.primary.len())),
+            ("hostmap.main.indexes", tamanho(self.hosts.len())),
+            ("hostmap.main.remoteIndexes", tamanho(self.hosts.len())),
+            ("hostmap.main.relayIndexes", tamanho(self.relay_index.len())),
+            ("hostmap.pending.hosts", tamanho(self.pending.len())),
+            (
+                "hostmap.pending.indexes",
+                tamanho(self.pending_by_index.len()),
+            ),
+            (
+                "certificate.ttl_seconds",
+                Value::Gauge(cert.not_after().saturating_sub(crate::util::now_unix())),
+            ),
+            (
+                "certificate.initiating_version",
+                Value::Gauge(i64::from(self.creds.initiating.number())),
+            ),
+            (
+                "certificate.max_version",
+                Value::Gauge(if self.creds.v2.is_some() { 2 } else { 1 }),
+            ),
+            ("routines", Value::Gauge(1)),
+        ];
+        if !lista.is_empty() {
+            lista.extend(
+                medidores
+                    .into_iter()
+                    .map(|(name, value)| Sample { name, value }),
+            );
+        }
+        lista
+    }
+
     pub(crate) fn raw_send(&self, bytes: &[u8], to: SocketAddr) {
         // Um erro do sistema aqui (rede fora do ar) é igual a um pacote perdido.
-        let _ = self.under.try_send_to(bytes, to);
+        if self.under.try_send_to(bytes, to).is_err() {
+            self.metrics.inc(stats::UDP_TX_DROPPED);
+        }
     }
 
     fn unreachable(&self, addr: IpAddr, reason: String) {

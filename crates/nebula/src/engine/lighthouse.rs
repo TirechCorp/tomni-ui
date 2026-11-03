@@ -64,6 +64,7 @@ impl<U: Underlay> Engine<U> {
                 details: Some(detalhes),
             }
             .marshal();
+            self.metrics.lighthouse_tx(MetaType::HostQuery, 1);
             self.send_message_to_vpn(lh, MessageType::LightHouse, 0, carga);
         }
     }
@@ -124,6 +125,8 @@ impl<U: Underlay> Engine<U> {
             details: Some(detalhes),
         }
         .marshal();
+        self.metrics
+            .lighthouse_tx(MetaType::HostUpdateNotification, 1);
         self.send_message_to_vpn(lh, MessageType::LightHouse, 0, carga);
     }
 
@@ -177,6 +180,7 @@ impl<U: Underlay> Engine<U> {
         let Some(meta) = Meta::unmarshal(carga) else {
             return;
         };
+        self.metrics.lighthouse_rx(meta.kind);
         let Some(detalhes) = meta.details else {
             return;
         };
@@ -253,6 +257,7 @@ impl<U: Underlay> Engine<U> {
             details: Some(resposta),
         }
         .marshal();
+        self.metrics.lighthouse_tx(MetaType::HostQueryReply, 1);
         self.send_to_host(indice, MessageType::LightHouse, 0, &carga);
 
         // Avisa o procurado de quem está atrás dele.
@@ -281,6 +286,8 @@ impl<U: Underlay> Engine<U> {
             details: Some(aviso),
         }
         .marshal();
+        self.metrics
+            .lighthouse_tx(MetaType::HostPunchNotification, 1);
         self.send_to_host(alvo, MessageType::LightHouse, 0, &carga);
     }
 
@@ -312,6 +319,8 @@ impl<U: Underlay> Engine<U> {
             details: Some(ack),
         }
         .marshal();
+        self.metrics
+            .lighthouse_tx(MetaType::HostUpdateNotificationAck, 1);
         self.send_to_host(indice, MessageType::LightHouse, 0, &carga);
     }
 

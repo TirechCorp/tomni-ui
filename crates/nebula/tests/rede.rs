@@ -526,3 +526,145 @@ async fn o_relay_com_certificado_v1_usa_o_formato_antigo() {
     ))
     .await;
 }
+
+/// Um GET pelo TCP de verdade: a linha de status e o corpo.
+async fn http_get(addr: SocketAddr, caminho: &str) -> (String, String) {
+    let mut conexao = tokio::net::TcpStream::connect(addr).await.unwrap();
+    conexao
+        .write_all(format!("GET {caminho} HTTP/1.1\r\nHost: teste\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut resposta = String::new();
+    conexao.read_to_string(&mut resposta).await.unwrap();
+    let (cabeca, corpo) = resposta.split_once("\r\n\r\n").unwrap();
+    (cabeca.lines().next().unwrap().to_owned(), corpo.to_owned())
+}
+
+/// O valor de uma linha do texto do Prometheus (`nome valor`, ou `nome{rótulo} valor`).
+fn valor(texto: &str, serie: &str) -> f64 {
+    texto
+        .lines()
+        .find_map(|linha| linha.strip_prefix(serie)?.strip_prefix(' '))
+        .unwrap_or_else(|| panic!("{serie} não está nas métricas:\n{texto}"))
+        .parse()
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn as_metricas_saem_pelo_prometheus() {
+    prazo(async {
+        let extra = "stats:\n  type: prometheus\n  listen: 127.0.0.1:0\n  path: /metrics\n  \
+                     namespace: nebula\n  interval: 10s\n  message_metrics: true\n  \
+                     lighthouse_metrics: true\n";
+        let p = par("no-v2", "no-v2-b", extra, NatKind::FullCone).await;
+        conferir_eco(&p.b, "10.42.0.20", 1000).await;
+        let addr = p.b.stats_addr().expect("o HTTP das métricas abriu");
+
+        let (status, texto) = http_get(addr, "/metrics").await;
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert!(valor(&texto, "nebula_handshake_manager_initiated") >= 2.0);
+        assert!(valor(&texto, "nebula_messages_tx_handshake_ixpsk0") >= 2.0);
+        assert!(valor(&texto, "nebula_messages_rx_handshake_ixpsk0") >= 2.0);
+        assert!(valor(&texto, "nebula_messages_tx_lighthouse") >= 1.0);
+        assert!(valor(&texto, "nebula_lighthouse_tx_HostQuery") >= 1.0);
+        assert!(valor(&texto, "nebula_lighthouse_rx_HostQueryReply") >= 1.0);
+        assert!(valor(&texto, "nebula_hostmap_main_hosts") >= 2.0);
+        assert!(valor(&texto, "nebula_handshakes{type=\"count\"}") >= 2.0);
+        assert!(valor(&texto, "nebula_handshakes{type=\"max\"}") > 0.0);
+        assert!(valor(&texto, "nebula_certificate_ttl_seconds") > 0.0);
+        assert!((valor(&texto, "nebula_certificate_max_version") - 2.0).abs() < f64::EPSILON);
+        assert!(texto.contains("# TYPE nebula_messages_rx_recv_error gauge\n"));
+        assert!(texto.contains("nebula_info{version=\""));
+
+        let (status, corpo) = http_get(addr, "/outro").await;
+        assert_eq!(status, "HTTP/1.1 404 Not Found");
+        assert_eq!(corpo, "404 page not found\n");
+        p.parar().await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_porta_das_metricas_ocupada_vira_aviso() {
+    prazo(async {
+        let ocupada = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let porta = ocupada.local_addr().unwrap().port();
+        let rede = SimNet::new();
+        let lh = lighthouse(&rede).await;
+        let extra = format!(
+            "stats:\n  type: prometheus\n  listen: 127.0.0.1:{porta}\n  path: /metrics\n  \
+             interval: 10s\n"
+        );
+        let a = no(
+            config_com("no-v2", "ca-25519", &extra),
+            rede.host("198.51.100.1", 4242),
+        )
+        .await;
+        conectado(&a).await;
+        assert_eq!(a.stats_addr(), None);
+        assert!(
+            a.warnings()
+                .iter()
+                .any(|aviso| aviso.starts_with("stats: ")),
+            "{:?}",
+            a.warnings()
+        );
+        a.stop().await;
+        lh.stop().await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn as_metricas_vao_ao_graphite() {
+    prazo(async {
+        let graphite = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destino = graphite.local_addr().unwrap();
+        let rede = SimNet::new();
+        let lh = lighthouse(&rede).await;
+        let extra = format!(
+            "stats:\n  type: graphite\n  host: {destino}\n  prefix: teste\n  interval: 200ms\n"
+        );
+        let a = no(
+            config_com("no-v2", "ca-25519", &extra),
+            rede.host("198.51.100.1", 4242),
+        )
+        .await;
+        conectado(&a).await;
+        // O primeiro envio sai na partida; espera um em que o túnel com o lighthouse já conta.
+        let mut linhas = String::new();
+        for _ in 0..50 {
+            let (mut conexao, _) = graphite.accept().await.unwrap();
+            linhas.clear();
+            conexao.read_to_string(&mut linhas).await.unwrap();
+            if linhas
+                .lines()
+                .any(|l| l.starts_with("teste.hostmap.main.hosts.value 1 "))
+            {
+                break;
+            }
+        }
+        assert!(
+            linhas
+                .lines()
+                .any(|l| l.starts_with("teste.hostmap.main.hosts.value 1 ")),
+            "{linhas}"
+        );
+        assert!(
+            linhas
+                .lines()
+                .any(|l| l.starts_with("teste.handshake_manager.initiated.count 1 "))
+        );
+        assert!(
+            linhas
+                .lines()
+                .any(|l| l.starts_with("teste.handshakes.50-percentile "))
+        );
+        // Sem `message_metrics`, só o `recv_error` das mensagens.
+        assert!(linhas.contains("teste.messages.tx.recv_error.count "));
+        assert!(!linhas.contains("teste.messages.tx.handshake_ixpsk0"));
+        a.stop().await;
+        lh.stop().await;
+    })
+    .await;
+}

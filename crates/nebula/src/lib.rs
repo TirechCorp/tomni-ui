@@ -47,6 +47,7 @@ mod pem;
 mod proto;
 mod remotes;
 mod replay;
+mod stats;
 #[cfg(test)]
 mod testutil;
 mod timers;
@@ -72,6 +73,7 @@ pub use config::{
     Punchy, RelayConfig, Severity, StaticMapNetwork, UnsafeRoute, Warning, parse_duration,
 };
 pub use engine::{State, TunnelInfo};
+pub use stats::{GraphiteProtocol, Stats, StatsExport};
 #[cfg(feature = "test-util")]
 pub use underlay::{NatKind, SimEndpoint, SimNat, SimNet};
 pub use underlay::{UdpUnderlay, Underlay};
@@ -239,6 +241,7 @@ impl NebulaBuilder {
             }
         }
         let mtu = usize::from(self.config.mtu);
+        let stats = self.config.stats.clone();
         let Handles {
             commands,
             from_net,
@@ -265,14 +268,43 @@ impl NebulaBuilder {
         };
         let stack = NetStack::spawn(tunnel);
         let bridge = SocksBridge::start(stack.clone()).await?;
+        // As métricas. O HTTP do Prometheus que não abre (a porta ocupada) não derruba a rede,
+        // como no Nebula: vira aviso.
+        let mut warnings = Vec::new();
+        let mut stats_addr = None;
+        let stats_task = match stats {
+            Some(stats) => {
+                let escuta = match &stats.export {
+                    StatsExport::Prometheus { listen, .. } => {
+                        match stats::bind_prometheus(listen).await {
+                            Ok(escuta) => {
+                                stats_addr = escuta.local_addr().ok();
+                                Some(escuta)
+                            }
+                            Err(erro) => {
+                                warnings.push(format!(
+                                    "stats: o endereço {listen} das métricas não abriu ({erro})"
+                                ));
+                                None
+                            }
+                        }
+                    }
+                    StatsExport::Graphite { .. } => None,
+                };
+                stats::spawn_exporter(stats, escuta, commands.clone())
+            }
+            None => None,
+        };
         Ok(Nebula {
             commands,
             state,
             task: Some(task),
+            stats_task,
+            stats_addr,
             stack,
             bridge: Some(bridge),
             local_addr,
-            warnings: Vec::new(),
+            warnings,
         })
     }
 }
@@ -284,6 +316,8 @@ pub struct Nebula {
     commands: mpsc::UnboundedSender<Command>,
     state: watch::Receiver<State>,
     task: Option<JoinHandle<()>>,
+    stats_task: Option<JoinHandle<()>>,
+    stats_addr: Option<SocketAddr>,
     stack: NetStack,
     bridge: Option<SocksBridge>,
     local_addr: SocketAddr,
@@ -329,6 +363,12 @@ impl Nebula {
     /// A porta UDP local (para os testes e o diagnóstico).
     pub fn udp_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    /// O endereço em que o HTTP das métricas do Prometheus (`stats.type: prometheus`) escuta,
+    /// se abriu. Com `stats.listen` na porta 0, é por aqui que se sabe a porta.
+    pub fn stats_addr(&self) -> Option<SocketAddr> {
+        self.stats_addr
     }
 
     /// Os avisos de quando a rede subiu (por exemplo, a porta UDP que estava ocupada).
@@ -404,6 +444,9 @@ impl Nebula {
 
     /// Fecha as conexões, avisa os pares (`CloseTunnel`) e para.
     pub async fn stop(mut self) {
+        if let Some(metricas) = self.stats_task.take() {
+            metricas.abort();
+        }
         if let Some(ponte) = self.bridge.take() {
             ponte.stop().await;
         }
@@ -422,6 +465,9 @@ impl Nebula {
 impl Drop for Nebula {
     fn drop(&mut self) {
         // Largada sem `stop`: ainda assim avisa os pares, sem esperar.
+        if let Some(metricas) = self.stats_task.take() {
+            metricas.abort();
+        }
         let (ack, _) = oneshot::channel();
         let _ = self.commands.send(Command::Stop(ack));
     }

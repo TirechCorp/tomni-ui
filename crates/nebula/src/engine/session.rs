@@ -8,6 +8,7 @@ use tokio::time::Instant;
 use super::{Cached, Engine, Host, Key, MAX_CACHED_PACKETS, Pending, Via, now_nanos};
 use crate::handshake::{Completed, Machine};
 use crate::header::{self, Header, MessageType};
+use crate::stats;
 use crate::tunnel::Tunnel;
 use crate::underlay::Underlay;
 
@@ -87,8 +88,10 @@ impl<U: Underlay> Engine<U> {
                 last_remotes: Vec::new(),
                 last_error: None,
                 sent_any: false,
+                started: Instant::now(),
             },
         );
+        self.metrics.inc(stats::HANDSHAKE_INITIATED);
         self.pending_by_index.insert(indice, vpn);
         self.timers.add(quando, Key::Handshake(vpn));
         self.query_lighthouses(vpn);
@@ -120,6 +123,7 @@ impl<U: Underlay> Engine<U> {
             return;
         }
         if p.counter >= tentativas {
+            self.metrics.inc(stats::HANDSHAKE_TIMED_OUT);
             self.handshake_timeout(vpn);
             return;
         }
@@ -152,6 +156,8 @@ impl<U: Underlay> Engine<U> {
             if furar {
                 self.raw_send(&[1], *destino);
             }
+            self.metrics
+                .tx(MessageType::Handshake, header::HANDSHAKE_IX_PSK0);
             self.raw_send(&pacote, *destino);
         }
     }
@@ -229,8 +235,14 @@ impl<U: Underlay> Engine<U> {
         }
         let indice = self.alloc_index();
         let mut maquina = Machine::new(self.creds.clone(), false, indice, None);
-        let Ok(passo) = maquina.process(pacote, now_nanos()) else {
-            return;
+        let passo = match maquina.process(pacote, now_nanos()) {
+            Ok(passo) => passo,
+            Err(erro) => {
+                if erro.blocklisted {
+                    self.metrics.inc(stats::HANDSHAKE_BLOCKLISTED);
+                }
+                return;
+            }
         };
         let (Some(resposta), Some(pronto)) = (passo.reply, passo.done) else {
             return;
@@ -268,6 +280,9 @@ impl<U: Underlay> Engine<U> {
                 return;
             }
             Err(erro) => {
+                if erro.blocklisted {
+                    self.metrics.inc(stats::HANDSHAKE_BLOCKLISTED);
+                }
                 p.last_error = Some(erro.reason);
                 if let Via::Udp(de) = via {
                     self.remotes.entry(vpn).or_default().block(de);
@@ -298,8 +313,14 @@ impl<U: Underlay> Engine<U> {
             self.restart_pending(vpn);
             return;
         }
+        let comecou = self.pending.get(&vpn).map(|p| p.started);
         match self.install(pronto, via, None, None) {
-            Ok(indice) => self.tunnel_opened(vpn, indice),
+            Ok(indice) => {
+                if let Some(comecou) = comecou {
+                    self.metrics.handshake_done(comecou.elapsed());
+                }
+                self.tunnel_opened(vpn, indice);
+            }
             Err(_) => {
                 // Já há um túnel melhor: os pacotes guardados vão por ele.
                 if let Some(&indice) = self.primary.get(&vpn) {
@@ -420,6 +441,7 @@ impl<U: Underlay> Engine<U> {
             Some(p) => std::mem::take(&mut p.cache),
             None => return,
         };
+        self.metrics.add(stats::CACHED_SENT, guardados.len() as u64);
         for item in guardados {
             match item {
                 Cached::Ip(pacote) => {
@@ -439,10 +461,12 @@ impl<U: Underlay> Engine<U> {
     /// Guarda algo para quando o túnel com `vpn` abrir, e começa o aperto de mão.
     pub(super) fn cache_and_handshake(&mut self, vpn: IpAddr, item: Cached) {
         self.start_handshake(vpn);
-        if let Some(p) = self.pending.get_mut(&vpn)
-            && p.cache.len() < MAX_CACHED_PACKETS
-        {
-            p.cache.push_back(item);
+        if let Some(p) = self.pending.get_mut(&vpn) {
+            if p.cache.len() < MAX_CACHED_PACKETS {
+                p.cache.push_back(item);
+            } else {
+                self.metrics.inc(stats::CACHED_DROPPED);
+            }
         }
     }
 

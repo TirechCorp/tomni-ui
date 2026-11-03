@@ -1,7 +1,7 @@
 //! O `config.yml` do Nebula: as chaves que o motor usa, com os padrões do Nebula, e o que ele
-//! ignora (a placa virtual, o `sshd`, as métricas) ou ainda não faz (o firewall de saída).
-//! Portado do que o Nebula lê em `config/`, `pki.go`, `lighthouse.go` e `punchy.go`
-//! (github.com/slackhq/nebula, licença MIT).
+//! ignora (a placa virtual, o `sshd`) ou ainda não faz (o firewall de saída).
+//! Portado do que o Nebula lê em `config/`, `pki.go`, `lighthouse.go`, `punchy.go` e
+//! `stats.go` (github.com/slackhq/nebula, licença MIT).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -10,6 +10,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use tomni_ui_netstack::Cidr;
+
+use crate::stats::{GraphiteProtocol, Stats, StatsExport};
 use yaml_rust2::{Yaml, YamlLoader};
 use zeroize::Zeroizing;
 
@@ -229,6 +231,8 @@ pub struct Config {
     pub inactivity_timeout: Duration,
     /// O `tunnels.drop_inactive` (padrão `false`).
     pub drop_inactive: bool,
+    /// O `stats`: as métricas do Nebula, ou `None` sem `stats.type` (ou com `none`).
+    pub stats: Option<Stats>,
 }
 
 /// As chaves do topo que o Nebula conhece. Qualquer outra vira aviso.
@@ -451,6 +455,7 @@ impl Config {
             .ok_or_else(|| ConfigError::new(format!("tun.mtu inválido: {mtu}")))?;
 
         let unsafe_routes = unsafe_routes(leitor.no("tun.unsafe_routes"))?;
+        let stats = stats(&leitor)?;
 
         // O que o Nebula usa e o app ignora, ou ainda não aplica.
         if leitor.boolean("sshd.enabled", false) {
@@ -458,15 +463,6 @@ impl Config {
                 key: "sshd".to_owned(),
                 message: "o servidor SSH de administração do Nebula não existe aqui; foi ignorado"
                     .to_owned(),
-            });
-        }
-        if leitor
-            .texto("stats.type")
-            .is_some_and(|tipo| !tipo.is_empty())
-        {
-            avisos.push(Warning {
-                key: "stats".to_owned(),
-                message: "as métricas do Nebula não existem aqui; foram ignoradas".to_owned(),
             });
         }
         if leitor.boolean("lighthouse.serve_dns", false) {
@@ -517,6 +513,7 @@ impl Config {
                 &mut avisos,
             ),
             drop_inactive: leitor.boolean("tunnels.drop_inactive", false),
+            stats,
         };
         Ok((config, avisos))
     }
@@ -777,6 +774,76 @@ fn unsafe_routes(no: &Yaml) -> Result<Vec<UnsafeRoute>, ConfigError> {
 }
 
 /// `true` se o `firewall.outbound` limita algo (diferente de uma regra que deixa tudo passar).
+/// O `stats`, como o `loadStatsConfig` do Nebula: um tipo desconhecido ou uma chave
+/// obrigatória faltando impedem o nó de subir.
+fn stats(leitor: &Leitor<'_>) -> Result<Option<Stats>, ConfigError> {
+    let tipo = leitor.texto("stats.type").unwrap_or_default();
+    let tipo = tipo.trim();
+    if tipo.is_empty() || tipo == "none" {
+        return Ok(None);
+    }
+    if tipo != "graphite" && tipo != "prometheus" {
+        return Err(ConfigError::new(format!(
+            "stats.type não reconhecido: {tipo} (use graphite, prometheus ou none)"
+        )));
+    }
+    let texto_intervalo = leitor.texto("stats.interval").unwrap_or_default();
+    let interval = parse_duration(&texto_intervalo)
+        .filter(|d| !d.is_zero())
+        .ok_or_else(|| {
+            ConfigError::new(format!(
+                "stats.interval não é uma duração válida: {texto_intervalo:?} (use 10s, 1m)"
+            ))
+        })?;
+    let obrigatorio = |chave: &str| {
+        leitor
+            .texto(chave)
+            .filter(|t| !t.trim().is_empty())
+            .ok_or_else(|| ConfigError::new(format!("{chave} não pode ficar vazio")))
+    };
+    let export = if tipo == "graphite" {
+        let protocol = match leitor.texto("stats.protocol").as_deref().map(str::trim) {
+            None | Some("" | "tcp") => GraphiteProtocol::Tcp,
+            Some("tcp4") => GraphiteProtocol::Tcp4,
+            Some("tcp6") => GraphiteProtocol::Tcp6,
+            Some(outro) => {
+                return Err(ConfigError::new(format!(
+                    "stats.protocol não reconhecido: {outro} (use tcp, tcp4 ou tcp6)"
+                )));
+            }
+        };
+        let host = obrigatorio("stats.host")?.trim().to_owned();
+        let porta_valida = host
+            .rsplit_once(':')
+            .is_some_and(|(_, porta)| porta.parse::<u16>().is_ok());
+        if !porta_valida {
+            return Err(ConfigError::new(format!(
+                "stats.host precisa de host:porta: {host}"
+            )));
+        }
+        StatsExport::Graphite {
+            protocol,
+            host,
+            prefix: leitor
+                .texto("stats.prefix")
+                .unwrap_or_else(|| "nebula".to_owned()),
+        }
+    } else {
+        StatsExport::Prometheus {
+            listen: obrigatorio("stats.listen")?.trim().to_owned(),
+            path: obrigatorio("stats.path")?.trim().to_owned(),
+            namespace: leitor.texto("stats.namespace").unwrap_or_default(),
+            subsystem: leitor.texto("stats.subsystem").unwrap_or_default(),
+        }
+    };
+    Ok(Some(Stats {
+        interval,
+        export,
+        message_metrics: leitor.boolean("stats.message_metrics", false),
+        lighthouse_metrics: leitor.boolean("stats.lighthouse_metrics", false),
+    }))
+}
+
 fn saida_restrita(no: &Yaml) -> bool {
     let Yaml::Array(regras) = no else {
         return false;

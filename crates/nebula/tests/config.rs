@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tomni_ui_nebula::{
-    Cipher, Config, Severity, StaticMapNetwork, Version, Warning, parse_duration,
+    Cipher, Config, GraphiteProtocol, Severity, StaticMapNetwork, Stats, StatsExport, Version,
+    Warning, parse_duration,
 };
 
 /// 2027-01-01, dentro da validade das fixtures.
@@ -337,7 +338,7 @@ fn erros_de_valor_trazem_a_chave_e_o_motivo() {
 #[test]
 fn chaves_desconhecidas_e_recursos_ausentes_viram_avisos() {
     let (_, avisos) = Config::from_yaml(
-        "esquisita: 1\nsshd:\n  enabled: true\nstats:\n  type: prometheus\nrelay:\n  am_relay: true\nlighthouse:\n  serve_dns: true\npunchy:\n  delay: abc\n",
+        "esquisita: 1\nsshd:\n  enabled: true\nrelay:\n  am_relay: true\nlighthouse:\n  serve_dns: true\npunchy:\n  delay: abc\n",
         None,
     )
     .unwrap();
@@ -349,11 +350,94 @@ fn chaves_desconhecidas_e_recursos_ausentes_viram_avisos() {
             "punchy.delay",
             "relay.am_relay",
             "sshd",
-            "stats",
             "lighthouse.serve_dns"
         ]
     );
     assert!(avisos[1].message.contains("a duração abc não é válida"));
+}
+
+#[test]
+fn stats_do_prometheus_e_do_graphite() {
+    let ler =
+        |yaml: &str| Config::from_yaml(yaml, None).map(|(config, avisos)| (config.stats, avisos));
+    let (stats, avisos) = ler(
+        "stats:\n  type: prometheus\n  listen: 127.0.0.1:8080\n  path: /metrics\n  \
+         namespace: prom\n  subsystem: nebula\n  interval: 10s\n  message_metrics: true\n",
+    )
+    .unwrap();
+    assert!(avisos.is_empty(), "{avisos:?}");
+    assert_eq!(
+        stats,
+        Some(Stats {
+            interval: Duration::from_secs(10),
+            export: StatsExport::Prometheus {
+                listen: "127.0.0.1:8080".to_owned(),
+                path: "/metrics".to_owned(),
+                namespace: "prom".to_owned(),
+                subsystem: "nebula".to_owned(),
+            },
+            message_metrics: true,
+            lighthouse_metrics: false,
+        })
+    );
+    let (stats, _) = ler(
+        "stats:\n  type: graphite\n  host: 127.0.0.1:9999\n  interval: 1m\n  \
+         lighthouse_metrics: true\n",
+    )
+    .unwrap();
+    assert_eq!(
+        stats,
+        Some(Stats {
+            interval: Duration::from_secs(60),
+            export: StatsExport::Graphite {
+                protocol: GraphiteProtocol::Tcp,
+                host: "127.0.0.1:9999".to_owned(),
+                prefix: "nebula".to_owned(),
+            },
+            message_metrics: false,
+            lighthouse_metrics: true,
+        })
+    );
+    let (stats, _) = ler(
+        "stats:\n  type: graphite\n  protocol: tcp6\n  host: \"[::1]:2003\"\n  prefix: x\n  interval: 5s\n",
+    )
+    .unwrap();
+    assert!(matches!(
+        stats.unwrap().export,
+        StatsExport::Graphite { protocol: GraphiteProtocol::Tcp6, ref prefix, .. } if prefix == "x"
+    ));
+    assert_eq!(ler("stats:\n  type: none\n").unwrap().0, None);
+    assert_eq!(ler("stats:\n  interval: 10s\n").unwrap().0, None);
+    assert_eq!(ler("listen:\n  port: 0\n").unwrap().0, None);
+}
+
+#[test]
+fn stats_com_erro_impede_de_subir_como_no_nebula() {
+    let erro = |yaml: &str| Config::from_yaml(yaml, None).unwrap_err().to_string();
+    assert!(erro("stats:\n  type: statsd\n").contains("stats.type não reconhecido: statsd"));
+    assert!(erro("stats:\n  type: prometheus\n").contains("stats.interval"));
+    assert!(erro("stats:\n  type: graphite\n  interval: 0s\n").contains("stats.interval"));
+    assert!(erro("stats:\n  type: graphite\n  interval: abc\n").contains("stats.interval"));
+    assert!(
+        erro("stats:\n  type: graphite\n  interval: 10s\n")
+            .contains("stats.host não pode ficar vazio")
+    );
+    assert!(
+        erro("stats:\n  type: graphite\n  interval: 10s\n  host: graphite\n")
+            .contains("stats.host precisa de host:porta")
+    );
+    assert!(
+        erro("stats:\n  type: graphite\n  interval: 10s\n  host: g:1\n  protocol: udp\n")
+            .contains("stats.protocol não reconhecido: udp")
+    );
+    assert!(
+        erro("stats:\n  type: prometheus\n  interval: 10s\n  path: /m\n")
+            .contains("stats.listen não pode ficar vazio")
+    );
+    assert!(
+        erro("stats:\n  type: prometheus\n  interval: 10s\n  listen: :1\n")
+            .contains("stats.path não pode ficar vazio")
+    );
 }
 
 #[test]

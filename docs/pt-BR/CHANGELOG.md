@@ -7,6 +7,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- `tomni-ui-nebula`: as métricas do Nebula (`stats` no config), com os mesmos nomes do Nebula
+  oficial. `stats.type: graphite` manda as linhas ao Graphite por TCP a cada `stats.interval`;
+  `stats.type: prometheus` abre um HTTP em `stats.listen` e `stats.path` para o Prometheus ler.
+  `stats.message_metrics` e `stats.lighthouse_metrics` ligam os contadores por tipo de mensagem.
+  `Config::stats` (`Stats`, `StatsExport`, `GraphiteProtocol`) traz o que foi lido e
+  `Nebula::stats_addr()` diz onde o HTTP abriu. Um `stats` com erro impede o nó de subir, como no
+  Nebula; antes ele era ignorado com um aviso.
 - `tomni-ui-nebula`: relays do Nebula, compatíveis com o Nebula oficial (certificados v1 e v2).
   Com `relay.relays` o nó aceita ser alcançado pelos relays listados e com `relay.use_relays`
   chega aos pares pelos relays que eles anunciam; é o caminho quando os dois lados estão atrás
