@@ -15,6 +15,9 @@
 //! `IORegistryEntryCreateCFProperties`, declaradas aqui), com os dicionários pelo
 //! `core-foundation`. As notificações do sistema (`Notifications`) falam com o
 //! `UNUserNotificationCenter` pelo `msg_send!` do `objc2`, com um delegate próprio para o clique.
+//! As temperaturas (`temperatures`) vêm dos serviços HID de temperatura do Apple Silicon, pelo
+//! `IOHIDEventSystemClient` do IOKit (exportado, mas fora dos cabeçalhos, e por isso declarado
+//! aqui), sem root; o nome do processador, do `machdep.cpu.brand_string`.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
 //! operação insegura, e nenhuma função pública do crate é `unsafe`.
@@ -29,6 +32,7 @@ mod memory;
 mod network;
 mod notification;
 mod process;
+mod temperature;
 
 #[cfg(test)]
 mod tests;
@@ -42,3 +46,4 @@ pub use process::{
     DiskUsage, ProcessInfo, ProcessState, ProcessUsage, all_pids, child_pids, process_info,
     process_path, process_usage, user_name,
 };
+pub use temperature::{Temperature, cpu_brand, temperatures};

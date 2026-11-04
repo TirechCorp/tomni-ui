@@ -7,8 +7,9 @@ use crate::memory::disponivel;
 use crate::network::{cabecalhos, interface};
 use crate::process::converter;
 use crate::{
-    CpuTimes, ProcessState, all_pids, child_pids, cpu_times, disk_counters, memory_status,
-    network_interfaces, process_info, process_path, process_usage, user_name,
+    CpuTimes, ProcessState, all_pids, child_pids, cpu_brand, cpu_times, disk_counters,
+    memory_status, network_interfaces, process_info, process_path, process_usage, temperatures,
+    user_name,
 };
 
 #[test]
@@ -224,4 +225,21 @@ fn imagem_de_disco_nao_e_fisica() {
     assert!(eh_fisico(Some("USB")));
     assert!(eh_fisico(None));
     assert!(!eh_fisico(Some("Virtual Interface")));
+}
+
+#[test]
+fn as_temperaturas_do_apple_silicon_e_o_nome_do_processador() {
+    let nome = cpu_brand().expect("o machdep.cpu.brand_string");
+    let sensores = temperatures().unwrap();
+    if nome.starts_with("Apple") {
+        // O die do chip sempre aparece no Apple Silicon, numa temperatura de gente.
+        assert!(
+            sensores.iter().any(|s| s.name.contains("tdie")),
+            "{sensores:?}"
+        );
+        for s in sensores.iter().filter(|s| s.name.contains("tdie")) {
+            assert!(s.celsius > 5.0 && s.celsius < 130.0, "{s:?}");
+        }
+    }
+    eprintln!("{nome}: {sensores:#?}");
 }

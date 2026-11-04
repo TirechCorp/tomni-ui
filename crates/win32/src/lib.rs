@@ -11,7 +11,10 @@
 //! `GlobalMemoryStatusEx`; o tempo de cada núcleo, o `NtQuerySystemInformation`; o tráfego das
 //! interfaces de rede, o `GetIfTable2`; e as operações de cada disco, o
 //! `IOCTL_DISK_PERFORMANCE`. As notificações do sistema (`Toasts`) gravam o nome e o ícone do
-//! app no registro (`RegCreateKeyExW`, `RegSetValueExW`). A pesquisa não achou crate com API segura para nenhuma
+//! app no registro (`RegCreateKeyExW`, `RegSetValueExW`). Os sensores de temperatura leem o
+//! `IOCTL_STORAGE_QUERY_PROPERTY` dos discos, o contador das zonas térmicas no PDH, o WMI do
+//! LibreHardwareMonitor (com o COM e os `VARIANT`) e o nome do processador no registro
+//! (`RegGetValueW`). A pesquisa não achou crate com API segura para nenhuma
 //! delas, e o usuário aprovou o `unsafe` contido aqui em 19/10.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
@@ -30,6 +33,7 @@ mod memory;
 mod network;
 mod pipe;
 mod process;
+mod sensors;
 mod toast;
 mod window;
 
@@ -45,6 +49,7 @@ pub use pipe::{named_pipe_client_pid, private_pipe};
 pub use process::{
     ProcessEntry, ProcessUsage, process_path, process_table, process_usage, process_user,
 };
+pub use sensors::{Fan, Sensors, Temperature, cpu_name, sensors};
 pub use toast::Toasts;
 pub use window::{CopyDataWindow, window_exists};
 

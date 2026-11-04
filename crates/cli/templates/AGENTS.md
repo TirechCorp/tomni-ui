@@ -596,6 +596,11 @@ As closures são reativas. O texto da aba (`app.text("id-chave")`) ganha o estad
 ("Testes, 45%, pede atenção"): `app.select` casa pelo texto inteiro, então numa aba com estado
 use `app.click("id-chave")`. Exemplo: `examples/tab_view.rs`, tela `atividade`.
 
+`.tab_visible(|chave| bool)` esconde as abas em que a closure é `false` (reativa): a aba sai da
+faixa, do Ctrl+Tab e das setas, e o painel continua montado, só oculto. Se a escolhida some, a
+escolha passa para a vizinha, como ao fechar; quando volta, não é escolhida de novo. Serve para a
+aba que só faz sentido às vezes (a de sensores numa máquina sem sensores).
+
 ```rust
 let aba = signal("geral".to_owned());
 TabView::bind(aba)

@@ -7,6 +7,16 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Added
 
+- `TabView::tab_visible(|key| bool)`: a tab whose (reactive) closure returns `false` leaves the
+  strip, Ctrl+Tab, the arrow keys and the equal-width layout, and its panel stays mounted, only
+  hidden. If the selected tab disappears, the selection moves to its neighbor; with
+  `.on_reorder`, the indices count only the visible tabs.
+- `tomni_ui_macos::temperatures()` and `cpu_brand()`: the Apple Silicon temperature sensors
+  (through `IOHIDEventSystemClient`, without root), with the name the system gives and the
+  degrees, and the processor name.
+- `tomni_ui_win32::sensors()` and `cpu_name()`, without administrator rights: the disk
+  temperatures (with the warning and critical limits), the ACPI thermal zones and, with
+  LibreHardwareMonitor running, its sensors and fans through WMI; and the processor name.
 - `tomni_ui::notification`: desktop notifications.
   `Notification::new(title).body(text).tag(group).on_click(f).show()`, with `close`,
   `available` and `set_app_name`; one with the same `tag` replaces the previous one and the

@@ -7,6 +7,16 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- `TabView::tab_visible(|chave| bool)`: a aba em que a closure (reativa) devolve `false` sai da
+  faixa, do Ctrl+Tab, das setas e da largura das abas iguais, e o painel continua montado, só
+  oculto. Se a escolhida some, a escolha passa para a vizinha; com `.on_reorder`, os índices
+  contam só as abas que aparecem.
+- `tomni_ui_macos::temperatures()` e `cpu_brand()`: os sensores de temperatura do Apple Silicon
+  (pelo `IOHIDEventSystemClient`, sem root), com o nome que o sistema dá e os graus, e o nome do
+  processador.
+- `tomni_ui_win32::sensors()` e `cpu_name()`, sem administrador: a temperatura dos discos (com o
+  aviso e o crítico), as zonas térmicas do ACPI e, com o LibreHardwareMonitor aberto, os
+  sensores e as ventoinhas dele pelo WMI; e o nome do processador.
 - `tomni_ui::notification`: as notificações do sistema.
   `Notification::new(título).body(texto).tag(grupo).on_click(f).show()`, com `close`,
   `available` e `set_app_name`; a de mesma `tag` toma o lugar da anterior e o clique roda na

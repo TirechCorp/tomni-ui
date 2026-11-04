@@ -1,6 +1,6 @@
 [package]
 name = "tomni-ui-macos"
-description = "As chamadas do macOS que nenhum crate expõe com API segura (o uso de CPU e de memória de um processo, os filhos dele, os discos e as notificações do sistema): um dos dois crates com unsafe do projeto, ao lado do tomni-ui-win32"
+description = "As chamadas do macOS que nenhum crate expõe com API segura (o uso de CPU e de memória de um processo, os filhos dele, os discos, as temperaturas e as notificações do sistema): um dos dois crates com unsafe do projeto, ao lado do tomni-ui-win32"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

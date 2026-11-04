@@ -276,6 +276,7 @@ type TabProgressFn = Rc<dyn Fn(String) -> Option<TabProgress>>;
 type TabConnectingFn = Rc<dyn Fn(String) -> bool>;
 type TabAttention = Rc<dyn Fn(String) -> bool>;
 type TabTooltip = Rc<dyn Fn(String) -> Option<String>>;
+type TabVisible = Rc<dyn Fn(String) -> bool>;
 
 /// O que o `TabView`, as abas, os painéis e os botões da faixa dividem.
 struct Shared {
@@ -314,6 +315,8 @@ struct Shared {
     attention: RefCell<Option<TabAttention>>,
     /// Dica de cada aba (`.tab_tooltip`).
     tooltip: RefCell<Option<TabTooltip>>,
+    /// Se cada aba aparece (`.tab_visible`).
+    visible: RefCell<Option<TabVisible>>,
     /// Durante um arrasto de aba: o vão entre as abas onde ela vai cair (0 é antes da
     /// primeira; o número de abas, depois da última).
     drop_gap: Signal<Option<usize>>,
@@ -327,7 +330,13 @@ struct Shared {
 }
 
 impl Shared {
-    /// Chaves das abas, na ordem (rastreado).
+    /// Se a aba `key` aparece (rastreado).
+    fn shown(&self, key: &str) -> bool {
+        let visible = self.visible.borrow().clone();
+        visible.is_none_or(|visible| visible(key.to_owned()))
+    }
+
+    /// Chaves das abas que aparecem, na ordem (rastreado).
     fn keys(&self) -> Vec<String> {
         let mut keys: Vec<String> = self.fixed.borrow().iter().map(|(k, _)| k.clone()).collect();
         let lists: Vec<Keys> = self
@@ -339,10 +348,11 @@ impl Shared {
         for list in lists {
             keys.extend(list());
         }
+        keys.retain(|k| self.shown(k));
         keys
     }
 
-    /// Chave e título das abas, na ordem (rastreado).
+    /// Chave e título das abas que aparecem, na ordem (rastreado).
     fn tabs(&self) -> Vec<(String, String)> {
         let mut tabs: Vec<(String, String)> = self
             .fixed
@@ -359,6 +369,7 @@ impl Shared {
         for list in lists {
             tabs.extend(list());
         }
+        tabs.retain(|(k, _)| self.shown(k));
         tabs
     }
 
@@ -544,6 +555,7 @@ impl TabView {
             connecting: RefCell::new(None),
             attention: RefCell::new(None),
             tooltip: RefCell::new(None),
+            visible: RefCell::new(None),
             drop_gap: signal(None),
             width: Cell::new(TabWidth::Equal),
             density: Cell::new(Density::Standard),
@@ -907,6 +919,16 @@ impl TabView {
     /// texto muda com eles. A dica tem o id `{id da aba}-tooltip`. Texto vazio não abre.
     pub fn tab_tooltip(self, f: impl Fn(String) -> Option<String> + 'static) -> Self {
         *self.shared.tooltip.borrow_mut() = Some(Rc::new(f));
+        self
+    }
+
+    /// Esconde as abas em que `f(chave)` é `false`, como o `Visibility` do `TabViewItem` no
+    /// WinUI: a aba sai da faixa, do Ctrl+Tab e das setas, e o painel dela não aparece, mas
+    /// continua montado (o estado não se perde). A closure é reativa. Se a aba escolhida some,
+    /// a escolha passa para a vizinha, como quando ela fecha; quando volta, não é escolhida
+    /// de novo. Com `.on_reorder`, os índices contam só as abas que aparecem.
+    pub fn tab_visible(self, f: impl Fn(String) -> bool + 'static) -> Self {
+        *self.shared.visible.borrow_mut() = Some(Rc::new(f));
         self
     }
 
@@ -1286,6 +1308,10 @@ impl TabHeader {
             button
         });
         let mut common = Common::generated(shared.sub(&slug));
+        if shared.visible.borrow().is_some() {
+            let (shown, shown_key) = (Rc::clone(shared), key.clone());
+            common.visible = Some(Prop::Dynamic(Rc::new(move || shown.shown(&shown_key))));
+        }
         let tip = shared.tooltip.borrow().clone();
         let (tip_key, tip_title) = (key.clone(), title.clone());
         common.tooltip = Some(Prop::Dynamic(Rc::new(move || {
