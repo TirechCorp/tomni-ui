@@ -107,6 +107,11 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Fixed
 
+- Slowness with many tabs and windows: `Tree::deadline` first asks whether an animator is
+  running, and only then whether it is shown, as `advance` already did. Before, every loop turn
+  walked up the ancestors of every idle menu item (the context menus of each terminal), running
+  each one's `.visible()`. `sync_layers` looks for open layers in a list of the tree's layers,
+  instead of the whole tree, three times per frame.
 - SSH: the password is also sent through `keyboard-interactive` when the server rejects the
   `password` method and offers that one (the FreeBSD and pfSense sshd, OpenSSH with
   `PasswordAuthentication no`). A second question after the password (a two-factor code)

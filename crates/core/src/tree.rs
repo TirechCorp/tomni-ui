@@ -187,6 +187,9 @@ pub struct Tree {
     overlays: Vec<NodeId>,
     /// Widgets que animam, na ordem da árvore.
     animators: Vec<NodeId>,
+    /// Widgets que são camadas ([`Widget::layer`]), na ordem da árvore: o [`Tree::sync_layers`]
+    /// procura as abertas só entre eles, e não na árvore toda a cada quadro.
+    layered: Vec<NodeId>,
     /// Widgets que querem saber onde estão o ponteiro e o foco ([`Widget::watches_within`]).
     watchers: Vec<NodeId>,
     /// `ScrollViewer`s comandados por fora ([`Widget::scroll_link`]).
@@ -261,6 +264,7 @@ impl Tree {
             passive: Vec::new(),
             overlays: Vec::new(),
             animators: Vec::new(),
+            layered: Vec::new(),
             watchers: Vec::new(),
             linked: Vec::new(),
             placers: Vec::new(),
@@ -480,6 +484,7 @@ impl Tree {
         self.tip_owners.clear();
         self.accelerator_owners.clear();
         self.animators.clear();
+        self.layered.clear();
         self.watchers.clear();
         self.linked.clear();
         self.placers.clear();
@@ -501,6 +506,9 @@ impl Tree {
             }
             if self.nodes[id].animates {
                 self.animators.push(id);
+            }
+            if self.nodes[id].layer.is_some() {
+                self.layered.push(id);
             }
             if self.nodes[id].watches {
                 self.watchers.push(id);
@@ -2330,7 +2338,7 @@ impl Tree {
     /// para quem o tinha quando ela abriu.
     fn sync_layers(&mut self) {
         self.overlays = self
-            .order
+            .layered
             .iter()
             .copied()
             .filter(|&id| {
@@ -2340,7 +2348,7 @@ impl Tree {
             })
             .collect();
         self.passive = self
-            .order
+            .layered
             .iter()
             .copied()
             .filter(|&id| {
@@ -2351,7 +2359,7 @@ impl Tree {
             })
             .collect();
         let opened: Vec<NodeId> = self
-            .order
+            .layered
             .iter()
             .copied()
             .filter(|&id| {
@@ -2665,10 +2673,12 @@ impl Tree {
     /// Quanto falta para algo mudar sozinho: [`ANIMATION_FRAME`] enquanto um widget que anima
     /// aparece, ou o tempo até a dica em contagem abrir. O loop de frame acorda a tempo.
     pub fn deadline(&self) -> Option<Duration> {
+        // O `ticking` antes do `shown`, como no `advance`: um item de menu parado não roda o
+        // `.visible()` dele e o dos ancestrais a cada volta do loop.
         let animation = self
             .animators
             .iter()
-            .any(|&id| self.shown(id) && self.ticking(id))
+            .any(|&id| self.ticking(id) && self.shown(id))
             .then_some(ANIMATION_FRAME);
         let tip = self
             .tip
@@ -2687,7 +2697,7 @@ impl Tree {
         let mut parts: Vec<String> = self
             .animators
             .iter()
-            .filter(|&&id| self.shown(id) && self.ticking(id))
+            .filter(|&&id| self.ticking(id) && self.shown(id))
             .map(|&id| {
                 let kind = untrack(|| self.nodes[id].widget.borrow().kind());
                 format!("{kind} {id:?}")
@@ -4250,6 +4260,51 @@ mod tests {
                 put(tree, "esconder", Rect::new(0.0, 0.0, 100.0, 44.0));
                 click(tree, Point::new(50.0, 20.0));
                 assert_eq!(tree.deadline(), None, "oculto, não acorda o loop");
+            },
+        );
+    }
+
+    /// O prazo pergunta primeiro se o animador está passando tempo: um item de menu parado não
+    /// roda o `.visible()` dele nem o dos ancestrais. Com muitas abas, cada uma com o menu de
+    /// contexto dela, isso pesava a cada volta do loop.
+    #[test]
+    fn prazo_nao_sobe_os_ancestrais_dos_animadores_parados() {
+        let perguntas = Rc::new(Cell::new(0u32));
+        let contar = Rc::clone(&perguntas);
+        with_tree(
+            move || {
+                Box::new(
+                    Column::new().child(
+                        Button::new("Mais").id("mais").flyout(
+                            crate::MenuFlyout::new()
+                                .id("menu")
+                                .item("novo", "Novo", || {})
+                                .submenu(
+                                    "exportar",
+                                    "Exportar",
+                                    crate::MenuFlyout::new().id("exportar-menu").item(
+                                        "csv",
+                                        "CSV",
+                                        || {},
+                                    ),
+                                )
+                                .item_visible(move || {
+                                    contar.set(contar.get() + 1);
+                                    true
+                                }),
+                        ),
+                    ),
+                )
+            },
+            |tree| {
+                let antes = perguntas.get();
+                assert_eq!(tree.deadline(), None);
+                assert_eq!(tree.deadline_reason(), None);
+                assert_eq!(
+                    perguntas.get(),
+                    antes,
+                    "o prazo rodou o .visible() do submenu parado"
+                );
             },
         );
     }

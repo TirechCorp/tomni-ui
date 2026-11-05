@@ -106,6 +106,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Corrigido
 
+- A lentidão com muitas abas e janelas: o `Tree::deadline` pergunta primeiro se o animador está
+  andando, e só depois se ele aparece, como o `advance` já fazia. Antes, cada volta do loop subia
+  os ancestrais de todos os itens de menu parados (os menus de contexto de cada terminal),
+  rodando o `.visible()` de cada um. O `sync_layers` procura as camadas abertas numa lista das
+  camadas da árvore, e não mais na árvore toda, três vezes por quadro.
 - SSH: a senha entra também pelo `keyboard-interactive`, quando o servidor recusa o método
   `password` e oferece esse (o sshd do FreeBSD e do pfSense, o OpenSSH com
   `PasswordAuthentication no`). Um segundo pedido depois da senha (um código de dois fatores)
