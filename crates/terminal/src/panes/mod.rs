@@ -10,12 +10,12 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::{Rc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tomni_ui_core::{
     Accelerator, Align, Button, Column, Common, Density, IntoProp, Justify, Key, Look, MenuFlyout,
-    Modifiers, ProgressStatus, Prop, Shortcut, Slot, Split, Symbol, TabProgress, TabView, Text,
-    ThemeColor, Token, Widget, WindowHandle,
+    Modifiers, ProgressStatus, Prop, Reuse, Shortcut, Slot, Split, Symbol, TabProgress, TabView,
+    Text, ThemeColor, Token, Widget, WindowHandle,
 };
 use tomni_ui_reactive::prelude::*;
 
@@ -189,6 +189,7 @@ impl Default for PaneShortcuts {
 type NewSession = Rc<dyn Fn() -> Session>;
 type OnDuplicate = Rc<dyn Fn(Session, DuplicatePlace)>;
 type OnClosed = Rc<dyn Fn(Session)>;
+type OnClosePane = Rc<dyn Fn(usize)>;
 type Configure = Rc<dyn Fn(Terminal) -> Terminal>;
 type TearOff = Rc<dyn Fn(Session, Option<(i32, i32)>)>;
 type MenuExtra = Rc<dyn Fn(Session, MenuFlyout) -> MenuFlyout>;
@@ -268,6 +269,8 @@ struct Shared {
     inside: Cell<bool>,
     /// O id do terminal que deve receber o foco, pedido por um atalho ([`Widget::take_focus_request`]).
     request: RefCell<Option<String>>,
+    /// Quem decide o fechamento de um painel com abas pelo atalho ([`TerminalPanes::on_close_pane`]).
+    on_close_pane: RefCell<Option<OnClosePane>>,
 }
 
 impl Drop for Shared {
@@ -452,7 +455,15 @@ impl Shared {
     }
 
     fn close_pane(&self) {
-        self.close_pane_at(self.layout.with_untracked(PaneLayout::active));
+        let (pane, has_tabs) = self.layout.with_untracked(|layout| {
+            let pane = layout.active();
+            (pane, !layout.pane(pane).tabs.is_empty())
+        });
+        let handler = self.on_close_pane.borrow().clone();
+        match handler {
+            Some(handler) if has_tabs => handler(pane),
+            _ => self.close_pane_at(pane),
+        }
     }
 
     /// Fecha o painel `pane`. Um painel vazio não tem abas para soltar.
@@ -600,7 +611,18 @@ pub struct TerminalPanes {
     shared: Rc<Shared>,
     /// A forma e o zoom da última árvore montada.
     built: Option<(Shape, Option<usize>)>,
+    /// Quando as abas escondidas foram lidas pela última vez ([`HIDDEN_PUMP`]).
+    hidden_pumped: Option<Instant>,
+    /// Se a última leitura das abas escondidas parou no limite de tempo com bytes sobrando: com
+    /// o fluxo pesado, elas são lidas a cada quadro, para a fila não encher e a conexão não
+    /// esperar.
+    flooded: bool,
 }
+
+/// O intervalo entre duas leituras das abas escondidas com fluxo leve (um `top`, um `tail -f`):
+/// ninguém vê a tela delas, e ler a cada quadro custava um quadro da janela inteira por pedaço
+/// que chegava. O aviso de atividade e o sino de uma aba escondida chegam com até este atraso.
+pub(crate) const HIDDEN_PUMP: Duration = Duration::from_millis(100);
 
 impl TerminalPanes {
     /// Mostra o layout que está em `layout`.
@@ -632,8 +654,11 @@ impl TerminalPanes {
                 configure: RefCell::new(None),
                 inside: Cell::new(false),
                 request: RefCell::new(None),
+                on_close_pane: RefCell::new(None),
             }),
             built: None,
+            hidden_pumped: None,
+            flooded: false,
         };
         panes.register(Prop::Value(PaneShortcuts::default()));
         LIVE.with(|live| live.borrow_mut().push(Rc::downgrade(&panes.shared)));
@@ -767,6 +792,14 @@ impl TerminalPanes {
     /// handler, o widget descarta a sessão.
     pub fn on_session_closed(self, f: impl Fn(Session) + 'static) -> Self {
         *self.shared.on_closed.borrow_mut() = Some(Rc::new(f));
+        self
+    }
+
+    /// O atalho de fechar o painel ([`PaneShortcuts::close_pane`]), num painel com abas, chama `f`
+    /// com o índice dele e não fecha nada: o app decide (perguntar, mover as abas). Um painel
+    /// vazio fecha direto, e sem este handler o atalho fecha o painel com as abas.
+    pub fn on_close_pane(self, f: impl Fn(usize) + 'static) -> Self {
+        *self.shared.on_close_pane.borrow_mut() = Some(Rc::new(f));
         self
     }
 
@@ -969,6 +1002,19 @@ pub fn move_session(session: Session, to: Signal<PaneLayout>, pane: usize) {
     to.update(|layout| layout.add_tab(session, pane));
 }
 
+/// Pede o foco para o terminal da aba escolhida do painel ativo do `TerminalPanes` vivo que mostra
+/// `layout`, para quem mudou o layout de fora (um painel fechado leva junto o terminal que tinha
+/// o foco). Sem um widget vivo com esse layout, não faz nada.
+pub fn focus_active_pane(layout: Signal<PaneLayout>) {
+    for shared in live() {
+        if shared.layout == layout {
+            shared.request_focus();
+        }
+    }
+    // O pedido é atendido na reconciliação do widget, que sem mudança no layout não viria.
+    layout.update(|_| {});
+}
+
 /// O terminal da sessão `session`, ligado ao painel dele.
 fn terminal(shared: &Rc<Shared>, session: Session) -> Terminal {
     let focus = Rc::clone(shared);
@@ -1091,7 +1137,14 @@ fn pane_frame(shared: &Rc<Shared>, pane: usize, common: Common) -> Box<dyn Widge
                 let session = *session;
                 move || session.title()
             },
-            move |session: Session| terminal(&for_content, session),
+            // A grade é montada de novo a cada divisão: o terminal de cada sessão volta inteiro
+            // (o menu, a seleção, a rolagem), e não é criado do zero.
+            move |session: Session| {
+                let shared = Rc::clone(&for_content);
+                Reuse::new(format!("terminal-panes:{}", session.key_str()), move || {
+                    terminal(&shared, session)
+                })
+            },
         )
         .on_close(move |key| {
             if let Some(session) = Session::find(&key) {
@@ -1510,7 +1563,11 @@ impl Widget for TerminalPanes {
     }
 
     fn ticking(&self) -> bool {
-        self.shared.hidden().into_iter().any(Session::pending)
+        self.hidden_wait() == Some(Duration::ZERO)
+    }
+
+    fn ticking_in(&self) -> Option<Duration> {
+        self.hidden_wait()
     }
 
     fn tick(&mut self, _dt: Duration) {
@@ -1519,8 +1576,24 @@ impl Widget for TerminalPanes {
             return;
         };
         let _ocultos = tomni_ui_core::stages::stage("terminais ocultos");
-        for session in hidden {
+        for &session in &hidden {
             session.pump(Some(READ_BUDGET / share));
+        }
+        self.hidden_pumped = Some(Instant::now());
+        self.flooded = hidden.into_iter().any(Session::pending);
+    }
+}
+
+impl TerminalPanes {
+    /// Quanto falta para ler as abas escondidas: `None` sem nada para ler, zero se já é hora
+    /// (a primeira chegada depois de um tempo parada, ou o fluxo pesado).
+    fn hidden_wait(&self) -> Option<Duration> {
+        if !self.shared.hidden().into_iter().any(Session::pending) {
+            return None;
+        }
+        match self.hidden_pumped {
+            Some(at) if !self.flooded => Some(HIDDEN_PUMP.saturating_sub(at.elapsed())),
+            _ => Some(Duration::ZERO),
         }
     }
 }
@@ -1542,6 +1615,45 @@ mod tests {
 
     fn sessao() -> Session {
         Session::new(Loopback::new())
+    }
+
+    #[test]
+    fn as_abas_escondidas_sao_lidas_a_cada_100_ms_e_a_cada_quadro_no_fluxo_pesado() {
+        let scope = Scope::root();
+        scope.run(|| {
+            let fonte = Loopback::new();
+            let entrada = fonte.handle();
+            let (a, b) = (sessao(), Session::new(fonte));
+            let mut panes = TerminalPanes::bind(signal(PaneLayout::with(vec![a, b])));
+            assert_eq!(panes.ticking_in(), None, "sem nada para ler, não agenda");
+            assert!(!panes.ticking());
+
+            // A primeira chegada é lida logo.
+            entrada.feed(b"um");
+            assert!(panes.ticking());
+            panes.tick(Duration::from_millis(16));
+            assert!(!b.pending());
+
+            // A seguinte espera o ritmo das escondidas.
+            entrada.feed(b"dois");
+            assert!(!panes.ticking());
+            let falta = panes.ticking_in().unwrap();
+            assert!(falta > Duration::ZERO && falta <= HIDDEN_PUMP);
+            panes.hidden_pumped = panes.hidden_pumped.map(|at| at - HIDDEN_PUMP);
+            assert!(panes.ticking(), "passados os 100 ms, lê");
+            panes.tick(Duration::from_millis(16));
+            assert!(!b.pending() && !panes.flooded);
+
+            // Com bytes sobrando depois do limite de tempo, lê a cada quadro.
+            entrada.feed(b"tres");
+            panes.flooded = true;
+            assert!(panes.ticking());
+            panes.tick(Duration::from_millis(16));
+            assert!(!panes.flooded, "esvaziou, volta ao ritmo das escondidas");
+            for session in [a, b] {
+                session.dispose();
+            }
+        });
     }
 
     #[test]

@@ -45,6 +45,9 @@ pub struct Ui {
     drawer: Box<dyn Drawer>,
     size: (u32, u32),
     states: SecondaryMap<NodeId, State>,
+    /// Os widgets nativos ([`Widget::native`](tomni_ui_core::Widget::native)), para o frame não
+    /// passar por todos os estados atrás deles.
+    natives: Vec<NodeId>,
     /// Widgets gravados desde o último [`Ui::repaints_since_last`].
     repaints: Vec<NodeId>,
     /// Mede e grava tudo no próximo frame (tema novo, por exemplo).
@@ -120,8 +123,13 @@ impl Ui {
         let mut layout = LayoutEngine::new(&tree);
         layout.set_viewport(Size::new(f64::from(width), f64::from(height)));
         let mut states = SecondaryMap::new();
+        let mut natives = Vec::new();
         for id in tree.ids() {
-            states.insert(id, State::new(&tree, id));
+            let state = State::new(&tree, id);
+            if state.native {
+                natives.push(id);
+            }
+            states.insert(id, state);
         }
         let mut ui = Self {
             scope,
@@ -130,6 +138,7 @@ impl Ui {
             drawer: Box::new(drawer),
             size: (width, height),
             states,
+            natives,
             repaints: Vec::new(),
             invalidate_all: true,
             caret_visible: true,
@@ -616,8 +625,16 @@ impl Ui {
                 self.states.remove(id);
             }
             for &id in &changes.added {
-                self.states.insert(id, State::new(&self.tree, id));
+                let state = State::new(&self.tree, id);
+                if state.native {
+                    self.natives.push(id);
+                }
+                self.states.insert(id, state);
                 changed.push(id);
+            }
+            if !changes.removed.is_empty() {
+                let states = &self.states;
+                self.natives.retain(|&id| states.contains_key(id));
             }
         }
 
@@ -668,8 +685,10 @@ impl Ui {
             self.place_natives();
             // Um widget que soube do próprio tamanho ([`Widget::resized`]) pode ter mudado
             // signals: os efeitos põem na fila quem depende deles.
-            run_effects();
-            untrack(|| self.tree.sync_focus());
+            if run_effects() > 0 {
+                // Sem efeito nenhum, a visibilidade é a que o `sync_focus` de cima já viu.
+                untrack(|| self.tree.sync_focus());
+            }
             changed = self.tree.take_dirty();
             if changed.is_empty() {
                 break;
@@ -805,15 +824,10 @@ impl Ui {
 
     /// Diz aos widgets nativos onde eles aparecem e atende os pedidos de foco deles.
     fn place_natives(&mut self) {
-        let natives: Vec<NodeId> = self
-            .states
-            .iter()
-            .filter(|(_, state)| state.native)
-            .map(|(id, _)| id)
-            .collect();
-        if natives.is_empty() {
+        if self.natives.is_empty() {
             return;
         }
+        let natives = self.natives.clone();
         let dark = self.drawer.tokens().theme == Theme::Dark;
         let layers = self.tree.open_layers();
         let hosted = tomni_ui_core::native::host().is_some();

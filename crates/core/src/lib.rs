@@ -121,7 +121,7 @@ pub use expander::{
 };
 pub use field_button::{FieldButtonVisual, FieldGlyph, SPIN_REPEAT};
 pub use flyout::{ContextFlyout, Flyout, FlyoutContent, MenuFlyout, MenuItemKind, MenuItemVisual};
-pub use fragments::{For, Show};
+pub use fragments::{For, Reuse, Show};
 pub use icon::{ICON_SIZE, Icon, IconVisual};
 pub use image::{Image, ImageSource, ImageVisual, Stretch};
 pub use info_bar::{InfoBar, InfoBarSeverity, InfoBarVisual};

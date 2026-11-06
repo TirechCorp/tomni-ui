@@ -100,6 +100,7 @@ fn path(stack: &[&'static str]) -> String {
 /// Liga a marcação das etapas, para o processo todo.
 pub fn enable() {
     ENABLED.store(true, Ordering::Release);
+    tomni_ui_reactive::profile_effects(true);
 }
 
 /// Se a marcação está ligada.
@@ -186,6 +187,9 @@ pub struct Totals {
     pub stages: Vec<(String, Duration, u32)>,
     /// A etapa de fora mais demorada, com quanto durou.
     pub slowest: Option<(String, Duration)>,
+    /// O tempo dos efeitos por origem (a linha do código ou o tipo do widget), com quantas vezes
+    /// rodaram, do que mais gastou para o que menos.
+    pub effects: Vec<(String, Duration, u32)>,
 }
 
 /// O tempo de cada etapa desde a última chamada, e zera a conta.
@@ -198,7 +202,16 @@ pub fn take_totals() -> Totals {
         .collect();
     stages.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let slowest = state.slowest.take().map(|(took, name)| (name, took));
-    Totals { stages, slowest }
+    drop(state);
+    let effects = tomni_ui_reactive::take_effect_totals()
+        .into_iter()
+        .map(|t| (t.origin.to_string(), t.time, t.count))
+        .collect();
+    Totals {
+        stages,
+        slowest,
+        effects,
+    }
 }
 
 #[cfg(test)]

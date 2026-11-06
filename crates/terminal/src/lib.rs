@@ -32,7 +32,8 @@ pub use links::{LinkHit, find_link};
 pub use log::plain_text;
 pub use panes::{
     Broadcast, DuplicatePlace, PANE_BORDER, PANE_DASH, Pane, PaneBorder, PaneDirection, PaneInfo,
-    PaneLayout, PaneShortcuts, PaneVisual, PanesActivity, PanesInfo, TerminalPanes, move_session,
+    PaneLayout, PaneShortcuts, PaneVisual, PanesActivity, PanesInfo, TerminalPanes,
+    focus_active_pane, move_session,
 };
 #[cfg(all(feature = "pty", not(target_os = "android")))]
 pub use process::{Process, ProcessBuilder};

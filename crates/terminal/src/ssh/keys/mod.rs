@@ -541,6 +541,12 @@ impl KeyInfo {
     }
 }
 
+/// O recurso do login para o `.ppk` Ed25519 que o `ssh-key` recusa (ver `ppk`): lê `path` e abre.
+pub(super) fn open_unusual_ppk(path: &Path, passphrase: Option<&str>) -> Option<PrivateKey> {
+    let text = Zeroizing::new(fs::read_to_string(path).ok()?);
+    ppk::read_ed25519(&text, passphrase)
+}
+
 /// Uma chave privada lida do disco e aberta (OpenSSH, PEM, PKCS#8 ou `.ppk`).
 pub struct KeyFile {
     key: PrivateKey,

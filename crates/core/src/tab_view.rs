@@ -747,6 +747,10 @@ impl TabView {
     /// num item valeria uma vez por aba (e o lint acusa o atalho repetido): mostre o atalho
     /// com `.accelerator()` num widget só.
     ///
+    /// O menu de cada aba só é feito (e entra na árvore) quando abre pela primeira vez: com
+    /// muitas abas, montar todos junto com elas pesava. Antes disso, os itens não têm ids na
+    /// árvore, e um `.shortcut()` num deles não valeria.
+    ///
     /// ```
     /// use tomni_ui_core::{MenuFlyout, TabView, Text};
     /// use tomni_ui_reactive::prelude::*;
@@ -1321,7 +1325,8 @@ impl TabHeader {
         })));
         let menu = shared.tab_menu.borrow().clone();
         if let Some(menu) = menu {
-            common.context_flyout = Some(ContextFlyout::new(menu(key.clone())));
+            let menu_key = key.clone();
+            common.context_flyout = Some(ContextFlyout::later(move || menu(menu_key)));
         }
         Self {
             common,

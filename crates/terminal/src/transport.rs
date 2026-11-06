@@ -255,7 +255,8 @@ impl Drop for ThreadMark {
 /// da mesma fila.
 ///
 /// [`Inbox::push`] e [`Inbox::close`] acordam a interface
-/// ([`tomni_ui_core::wake`]): o terminal lê no frame seguinte. Uma thread que lê de um
+/// ([`tomni_ui_core::wake`]): o terminal lê no frame seguinte. O `push` só acorda quando a fila
+/// passa de vazia (já lida) para com bytes; enquanto há o que ler, o terminal lê sozinho. Uma thread que lê de um
 /// programa ou da rede usa [`Inbox::push_wait`], que espera a interface ler quando a fila passa
 /// de [`INBOX_LIMIT`]; quem não pode esperar (a thread da interface, um laço assíncrono) usa
 /// [`Inbox::push`] e, se for o caso, para de ler enquanto [`Inbox::has_room`] for falso.
@@ -284,8 +285,19 @@ impl Inbox {
             return;
         }
         self.queue().bytes.extend(bytes);
-        self.shared.pending.store(true, Ordering::Release);
-        tomni_ui_core::wake();
+        self.announce();
+    }
+
+    /// Marca que há bytes e acorda a interface só se ela ainda não sabia: com o `pending` já
+    /// ligado, o terminal continua lendo a cada frame ([`Transport::pending`]) e um despertar a
+    /// mais por pedaço só gastaria quadros (um `yes` mandava milhares por segundo).
+    /// Devolve se acordou.
+    fn announce(&self) -> bool {
+        let woke = !self.shared.pending.swap(true, Ordering::AcqRel);
+        if woke {
+            tomni_ui_core::wake();
+        }
+        woke
     }
 
     /// Põe bytes na fila e, com ela acima do [`INBOX_LIMIT`], espera antes a interface ler
@@ -306,8 +318,7 @@ impl Inbox {
         }
         queue.bytes.extend(bytes);
         drop(queue);
-        self.shared.pending.store(true, Ordering::Release);
-        tomni_ui_core::wake();
+        self.announce();
     }
 
     /// Quantos bytes esperam na fila (para os testes).
@@ -595,6 +606,26 @@ mod tests {
         assert_eq!(inbox.read(&mut buf, 4), Status::Closed(Some("fim".into())));
         assert_eq!(buf, b"abcdef");
         assert!(!inbox.pending());
+    }
+
+    #[test]
+    fn a_fila_so_acorda_a_interface_quando_passa_de_vazia_para_com_bytes() {
+        let inbox = Inbox::new();
+        inbox.queue().bytes.extend(b"ab");
+        assert!(inbox.announce(), "a primeira chegada acorda");
+        assert!(
+            !inbox.announce(),
+            "com bytes ainda por ler, não acorda de novo"
+        );
+        let mut buf = Vec::new();
+        inbox.read(&mut buf, 1);
+        assert!(
+            !inbox.announce(),
+            "lida só em parte, a fila ainda tem o que ler"
+        );
+        inbox.read(&mut buf, usize::MAX);
+        assert!(!inbox.pending());
+        assert!(inbox.announce(), "esvaziada, a próxima chegada acorda");
     }
 
     #[test]

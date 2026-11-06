@@ -295,3 +295,52 @@ fn init_pode_ser_chamada_varias_vezes() {
     init();
     assert_eq!(run_effects(), 0);
 }
+
+/// A medição dos efeitos soma o tempo pela origem: a linha que chamou `effect` ou o nome de
+/// `effect_named`. Os outros testes rodam ao mesmo tempo, então só as origens deste contam.
+#[test]
+fn a_medicao_soma_os_efeitos_pela_origem() {
+    crate::profile_effects(true);
+    let scope = Scope::root();
+    let a = scope.run(|| {
+        let a = signal(0);
+        crate::effect_named("teste-nomeado", move || {
+            let _ = a.get();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        });
+        effect(move || {
+            let _ = a.get();
+        });
+        a
+    });
+    run_effects();
+    a.set(1);
+    run_effects();
+
+    let totals = crate::take_effect_totals();
+    let named = totals
+        .iter()
+        .find(|t| t.origin == crate::EffectOrigin::Named("teste-nomeado"))
+        .expect("o efeito com nome não foi medido");
+    assert_eq!(named.count, 2, "roda na criação e depois do set");
+    assert!(
+        named.time >= std::time::Duration::from_millis(4),
+        "{named:?}"
+    );
+    // O `logged` dos outros testes também cai neste arquivo, numa linha do começo.
+    let lines: Vec<String> = totals.iter().map(|t| t.origin.to_string()).collect();
+    assert!(
+        lines.iter().any(|o| o
+            .strip_prefix("reactive/src/tests.rs:")
+            .and_then(|n| n.parse::<u32>().ok())
+            .is_some_and(|n| n > 300)),
+        "o efeito sem nome não levou a linha: {lines:?}"
+    );
+    // A conta zera a cada leitura.
+    assert!(
+        !crate::take_effect_totals()
+            .iter()
+            .any(|t| t.origin == crate::EffectOrigin::Named("teste-nomeado"))
+    );
+    scope.clear();
+}

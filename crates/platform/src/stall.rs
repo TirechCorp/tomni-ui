@@ -399,6 +399,15 @@ fn summary(
             .collect();
         let _ = write!(entry, "\n  tempo por etapa: {}", list.join("; "));
     }
+    if !totals.effects.is_empty() {
+        let list: Vec<_> = totals
+            .effects
+            .iter()
+            .take(TOP)
+            .map(|(origin, time, count)| format!("{origin} {} em {count}×", duration(*time)))
+            .collect();
+        let _ = write!(entry, "\n  efeitos mais caros: {}", list.join("; "));
+    }
     if let Some(system) = probe.system() {
         let _ = write!(entry, "\n  sistema: {system}");
     }
@@ -535,6 +544,7 @@ mod tests {
         let leve = Totals {
             stages: vec![("quadro".into(), Duration::from_secs(1), 600)],
             slowest: Some(("quadro".into(), Duration::from_millis(20))),
+            effects: Vec::new(),
         };
         let falso = Falso::novo();
         assert!(
@@ -548,6 +558,14 @@ mod tests {
                 ("quadro".into(), Duration::from_secs(5), 3600),
             ],
             slowest: Some(("desenho".into(), Duration::from_millis(1300))),
+            effects: vec![
+                ("terminal".into(), Duration::from_secs(9), 41_000),
+                (
+                    "app/src/abas.rs:120".into(),
+                    Duration::from_millis(700),
+                    3600,
+                ),
+            ],
         };
         let linha = summary(&pesado, &antes, &depois, minuto, &falso).unwrap();
         assert!(
@@ -560,6 +578,12 @@ mod tests {
         assert!(
             linha.contains(
                 "tempo por etapa: quadro › layout 20,0 s em 3600×; quadro 5,0 s em 3600×"
+            ),
+            "{linha}"
+        );
+        assert!(
+            linha.contains(
+                "efeitos mais caros: terminal 9,0 s em 41000×; app/src/abas.rs:120 700 ms em 3600×"
             ),
             "{linha}"
         );

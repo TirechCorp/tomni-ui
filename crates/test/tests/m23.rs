@@ -11,6 +11,7 @@ use tomni_ui::kurbo::Point;
 use tomni_ui::prelude::*;
 use tomni_ui::terminal::{
     Loopback, LoopbackHandle, PaneLayout, PaneShortcuts, Session, Terminal, TerminalPanes,
+    focus_active_pane,
 };
 use tomni_ui::theme::Theme;
 use tomni_ui::{Key, Modifiers, SPLIT_KEY_STEP, SPLIT_SIZER, Shortcut};
@@ -462,6 +463,21 @@ fn snapshots_dos_paineis() {
     }
 }
 
+#[test]
+fn o_zoom_leva_o_foco_ao_painel_ativo() {
+    // Os terminais voltam inteiros a cada mudança da grade (`Reuse`): o foco tem de seguir o
+    // painel ativo como seguia quando eram criados de novo (`focus_on_mount`).
+    let mut p = paineis(9, Theme::Light);
+    p.muda(|l| l.grid(3, 3));
+    p.app.click("paineis-terminal-web-02");
+    assert!(p.foco_no_ativo());
+    p.muda(|l| l.zoom(4));
+    assert_eq!(p.layout.get_untracked().active(), 4);
+    assert!(p.foco_no_ativo(), "o foco vai ao painel em zoom");
+    p.muda(|l| l.zoom(4));
+    assert!(p.foco_no_ativo(), "e fica nele ao sair do zoom");
+}
+
 const ALT_SHIFT: Modifiers = Modifiers {
     alt: true,
     shift: true,
@@ -591,6 +607,54 @@ fn atalho_de_fechar_o_painel_avisa_o_app() {
     assert_eq!(p.forma(), "col[0,row[1,2]]");
     assert_eq!(*p.fechadas.borrow(), ["web-01"]);
     assert!(p.foco_no_ativo());
+}
+
+#[test]
+fn on_close_pane_decide_o_painel_com_abas_e_o_vazio_fecha_direto() {
+    let pedidos = Rc::new(RefCell::new(Vec::new()));
+    let p2 = Rc::clone(&pedidos);
+    let mut p = paineis_com(2, Theme::Light, move |paineis| {
+        let pedidos = Rc::clone(&p2);
+        paineis.on_close_pane(move |painel| pedidos.borrow_mut().push(painel))
+    });
+    p.muda(|l| l.grid(3, 1));
+    assert_eq!(p.abas(0), ["web-01"]);
+    assert_eq!(p.abas(1), ["web-02"]);
+    assert_eq!(p.abas(2), Vec::<String>::new());
+
+    // Com abas, a lib só avisa: a decisão é do app, e nada fecha.
+    p.app.click("paineis-terminal-web-02");
+    let ctrl_shift = Modifiers::CTRL | Modifiers::SHIFT;
+    p.app.key_with(Key::Char('w'), ctrl_shift);
+    assert_eq!(*pedidos.borrow(), [1]);
+    assert_eq!(p.abas(1), ["web-02"]);
+    assert!(p.fechadas.borrow().is_empty());
+
+    // O painel vazio não tem o que decidir: fecha sem avisar.
+    p.muda(|l| l.set_active(2));
+    p.app.key_with(Key::Char('w'), ctrl_shift);
+    p.app.frame();
+    assert_eq!(*pedidos.borrow(), [1]);
+    assert_eq!(p.layout.with_untracked(PaneLayout::pane_count), 2);
+    for s in &p.sessoes {
+        s.dispose();
+    }
+}
+
+#[test]
+fn focus_active_pane_leva_o_foco_ao_terminal_do_painel_ativo() {
+    let mut p = paineis(2, Theme::Light);
+    p.muda(|l| l.grid(2, 1));
+    p.app.click("paineis-terminal-web-01");
+    assert!(p.foco_no_ativo());
+    p.muda(|l| l.set_active(1));
+    assert!(!p.foco_no_ativo(), "só mudar o ativo não traz o foco");
+    focus_active_pane(p.layout);
+    p.app.frame();
+    assert!(p.foco_no_ativo());
+    for s in &p.sessoes {
+        s.dispose();
+    }
 }
 
 #[test]

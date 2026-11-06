@@ -19,6 +19,11 @@
 //!
 //! Vários arquivos de uma vez: [`open_files`] e [`FileDialog::show_many`].
 //!
+//! Em [`save_file`] com filtro, um nome sem extensão ganha a primeira extensão do primeiro
+//! filtro (`backup` vira `backup.json`), como o `SetDefaultExtension` do diálogo do Windows. O
+//! portal do Linux e o `zenity` gravariam o nome como veio, e o arquivo sumiria do filtro do
+//! diálogo de abrir.
+//!
 //! Com [`FileDialog::remember`], o diálogo abre na pasta da última resposta com o mesmo nome
 //! (como o `SettingsIdentifier` do `FileOpenPicker` do WinUI), e não no `.directory(..)`. A
 //! lib guarda as pastas na memória; o app que quer lembrá-las entre execuções instala um
@@ -121,11 +126,39 @@ impl Drop for FileDialogAnswer {
 
 type Callback = Box<dyn FnOnce(Vec<PathBuf>)>;
 
-/// Um pedido sem resposta: quem chamar e onde guardar a pasta.
+/// Um pedido sem resposta: quem chamar, onde guardar a pasta e a extensão de um nome sem.
 struct Pending {
     callback: Callback,
     kind: FileDialogKind,
     remember: Option<String>,
+    /// Em [`save_file`], a primeira extensão do primeiro filtro (sem `*`).
+    default_extension: Option<String>,
+}
+
+/// A extensão que [`save_file`] põe num nome sem nenhuma: a primeira do primeiro filtro, se não
+/// for `*` (qualquer arquivo).
+fn default_extension(request: &FileDialogRequest) -> Option<String> {
+    if request.kind != FileDialogKind::Save {
+        return None;
+    }
+    let first = request.filters.first()?.extensions.first()?;
+    let first = first.trim_start_matches('.');
+    (!first.is_empty() && first != "*").then(|| first.to_owned())
+}
+
+/// `path` com `extension`, se o nome do arquivo não tem extensão. Um nome que começa com ponto
+/// (`.bashrc`) fica como veio: o diálogo do Windows também lê o que vem depois do ponto como a
+/// extensão.
+fn with_default_extension(mut path: PathBuf, extension: Option<&str>) -> PathBuf {
+    if let Some(extension) = extension
+        && path
+            .file_name()
+            .is_some_and(|n| !n.to_string_lossy().starts_with('.'))
+        && path.extension().is_none()
+    {
+        path.set_extension(extension);
+    }
+    path
 }
 
 struct State {
@@ -235,6 +268,10 @@ pub fn deliver() -> bool {
     for (id, paths) in ready {
         let pending = STATE.with(|s| s.borrow_mut().pending.remove(&id));
         if let Some(pending) = pending {
+            let paths: Vec<PathBuf> = paths
+                .into_iter()
+                .map(|p| with_default_extension(p, pending.default_extension.as_deref()))
+                .collect();
             if let (Some(key), Some(first)) = (&pending.remember, paths.first()) {
                 remember(key, pending.kind, first);
             }
@@ -348,6 +385,7 @@ impl FileDialog {
             callback: Box::new(on_answer),
             kind: self.request.kind,
             remember: self.remember,
+            default_extension: default_extension(&self.request),
         };
         let (answer, service) = STATE.with(|s| {
             let mut s = s.borrow_mut();
@@ -611,6 +649,83 @@ mod tests {
         deliver();
         assert_eq!(memoria.folder("chaves"), Some(pasta.0.join("dentro")));
         STATE.with(|s| s.borrow_mut().memory = None);
+        clear_service();
+    }
+
+    /// Responde o primeiro pedido do `falso` com `caminho` e devolve o que o callback recebeu.
+    fn responder_com(
+        falso: &Falso,
+        caminho: &str,
+        pedir: impl FnOnce(Rc<RefCell<Option<PathBuf>>>),
+    ) -> Option<PathBuf> {
+        let resposta = Rc::new(RefCell::new(None::<PathBuf>));
+        pedir(resposta.clone());
+        let answer = falso.respostas.borrow_mut().pop().unwrap();
+        answer.send(Some(PathBuf::from(caminho)));
+        deliver();
+        resposta.take()
+    }
+
+    #[test]
+    fn salvar_sem_extensao_ganha_a_do_primeiro_filtro() {
+        let falso = falso();
+        let salvar = |filtros: &'static [(&'static str, &'static [&'static str])]| {
+            move |r: Rc<RefCell<Option<PathBuf>>>| {
+                let mut d = save_file();
+                for (nome, ext) in filtros {
+                    d = d.filter(*nome, ext);
+                }
+                d.show(move |p| *r.borrow_mut() = p);
+            }
+        };
+        let json: &[(&str, &[&str])] = &[("JSON", &["json"]), ("Texto", &["txt"])];
+        // Sem extensão: ganha a primeira do primeiro filtro.
+        assert_eq!(
+            responder_com(&falso, "/tmp/backup", salvar(json)),
+            Some(PathBuf::from("/tmp/backup.json"))
+        );
+        // Com uma extensão, mesmo de outro filtro ou de nenhum, fica como veio.
+        for caminho in [
+            "/tmp/backup.json",
+            "/tmp/notas.txt",
+            "/tmp/cofre.05-11",
+            "/tmp/.bashrc",
+        ] {
+            assert_eq!(
+                responder_com(&falso, caminho, salvar(json)),
+                Some(PathBuf::from(caminho)),
+                "{caminho}"
+            );
+        }
+        // Extensão com ponto ou com hífen.
+        let cofre: &[(&str, &[&str])] = &[("Cofre", &["tirech-vault"])];
+        assert_eq!(
+            responder_com(&falso, "/tmp/cofre", salvar(cofre)),
+            Some(PathBuf::from("/tmp/cofre.tirech-vault"))
+        );
+        // Sem filtro, ou com "qualquer arquivo" primeiro: nada muda.
+        let qualquer: &[(&str, &[&str])] = &[("Todos", &["*"]), ("JSON", &["json"])];
+        for filtros in [&[][..], qualquer] {
+            assert_eq!(
+                responder_com(&falso, "/tmp/config", salvar(filtros)),
+                Some(PathBuf::from("/tmp/config"))
+            );
+        }
+        clear_service();
+    }
+
+    #[test]
+    fn abrir_nao_mexe_na_extensao() {
+        let falso = falso();
+        let abrir = |r: Rc<RefCell<Option<PathBuf>>>| {
+            open_file()
+                .filter("JSON", &["json"])
+                .show(move |p| *r.borrow_mut() = p);
+        };
+        assert_eq!(
+            responder_com(&falso, "/tmp/sem-extensao", abrir),
+            Some(PathBuf::from("/tmp/sem-extensao"))
+        );
         clear_service();
     }
 }

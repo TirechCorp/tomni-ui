@@ -100,7 +100,7 @@ pub mod prelude {
         Edit, Expander, Flyout, For, Form, HeatMap, Icon, Image, InfoBar, InfoBarSeverity, Insets,
         ItemStatus, Justify, Key, LevelMeter, MenuBar, MenuFlyout, NavigationMode, NavigationView,
         NumberBox, PasswordReveal, ProgressBar, ProgressRing, ProgressStatus, PropertyGrid,
-        RadioButtons, RichText, Row, RowTone, ScrollViewer, SettingsCard, SettingsExpander,
+        RadioButtons, Reuse, RichText, Row, RowTone, ScrollViewer, SettingsCard, SettingsExpander,
         Shortcut, Show, Slider, SortDirection, Span, Sparkline, SpinButtons, Split, Stretch,
         Symbol, TabProgress, TabView, TabWidth, Text, TextEditor, TextEditorController, TextRamp,
         ThemeColor, TitleBadge, TitleBar, ToggleButton, ToggleSwitch, Token, TreeItem, TreeItems,

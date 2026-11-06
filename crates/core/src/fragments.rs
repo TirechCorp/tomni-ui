@@ -1,4 +1,5 @@
-//! `Show` e `For`: fragmentos que trocam os filhos quando os dados mudam.
+//! `Show` e `For`: fragmentos que trocam os filhos quando os dados mudam. `Reuse`: o que
+//! sobrevive quando o contêiner de cima é montado de novo.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -112,6 +113,90 @@ impl fmt::Debug for Show {
         f.debug_struct("Show")
             .field("common", &self.common)
             .field("shown", &self.shown)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Uma view que sobrevive quando o contêiner de cima é montado de novo: se a montagem nova tem
+/// um `Reuse` com a mesma chave de um que está saindo, a árvore põe a subárvore de antes no
+/// lugar novo, com os widgets, o estado, o foco, os efeitos e os signals dela, e a view não é
+/// criada. Sem um `Reuse` de antes com a chave, a view é criada como num `Show`.
+///
+/// Serve quando um fragmento remonta uma estrutura que muda de forma, mas cujas partes são as
+/// mesmas: o `TerminalPanes` do `tomni-ui-terminal` remonta a grade a cada divisão, e cada
+/// terminal (com o menu de contexto, o histórico e a seleção) volta inteiro, pela chave da
+/// sessão.
+///
+/// ```
+/// use tomni_ui_core::{Column, Reuse, Show, Text};
+/// use tomni_ui_reactive::prelude::*;
+///
+/// # let scope = Scope::root();
+/// # scope.run(|| {
+/// let em_coluna = signal(true);
+/// let lista = Show::when(em_coluna, || {
+///     Column::new().child(Reuse::new("editor", || Text::new("o mesmo widget")))
+/// })
+/// .otherwise(|| Column::new().child(Text::new("outra coluna")).child(
+///     Reuse::new("editor", || Text::new("o mesmo widget")),
+/// ));
+/// # });
+/// # scope.clear();
+/// ```
+///
+/// A chave vale entre os que saem e os que entram numa mesma reconciliação: um `Reuse` que
+/// saiu antes não volta depois. A subárvore leva o layout de antes (o crescimento, a base do
+/// flex), então o contêiner novo em volta dela deve ser como o de antes. Os signals e efeitos da
+/// view ficam num escopo só dela, que não é filho do escopo de quem a montou: ela não some junto
+/// com a montagem de antes.
+pub struct Reuse {
+    common: Common,
+    key: String,
+    view: Option<Box<dyn FnOnce() -> Box<dyn Widget>>>,
+}
+
+impl Reuse {
+    /// A view `view`, identificada por `key`.
+    pub fn new<V: View>(key: impl Into<String>, view: impl FnOnce() -> V + 'static) -> Self {
+        Self {
+            common: Common::default(),
+            key: key.into(),
+            view: Some(Box::new(move || Box::new(view()))),
+        }
+    }
+}
+
+impl Widget for Reuse {
+    fn kind(&self) -> &'static str {
+        "reuse"
+    }
+
+    fn common(&self) -> &Common {
+        &self.common
+    }
+
+    fn look(&self) -> Look {
+        Look::Fragment
+    }
+
+    fn fragment(&self) -> bool {
+        true
+    }
+
+    fn reuse_key(&self) -> Option<&str> {
+        Some(&self.key)
+    }
+
+    fn reconcile(&mut self) -> Option<Vec<Slot>> {
+        let view = self.view.take()?;
+        Some(vec![Slot::New(view)])
+    }
+}
+
+impl fmt::Debug for Reuse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Reuse")
+            .field("key", &self.key)
             .finish_non_exhaustive()
     }
 }

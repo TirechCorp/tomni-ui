@@ -184,6 +184,12 @@ impl LayoutEngine {
     /// Acompanha as mudanças de um [`Tree::reconcile`]: remove os nós de quem saiu, cria os de
     /// quem entrou e refaz só as listas de filhos que mudaram.
     pub fn sync(&mut self, tree: &Tree, changes: &Changes) {
+        // As subárvores que mudaram de pai saem das árvores do taffy de antes, que podem sumir
+        // com quem saiu, e entram nas novas depois de os pais novos existirem.
+        let mut moving = Vec::new();
+        for &id in &changes.moved {
+            self.lift(tree, id, &mut moving);
+        }
         for &id in &changes.removed {
             // O pai sai antes dos filhos: a árvore de um `ScrollViewer` removido já foi junto.
             if let Some((pane, node)) = self.nodes.remove(id)
@@ -199,11 +205,31 @@ impl LayoutEngine {
         for &id in &changes.added {
             self.create(tree, id);
         }
+        let mut relinked = Vec::with_capacity(moving.len());
+        for (id, style, context) in moving {
+            let pane = pane_of(tree, id);
+            let taffy = self.taffy(pane).expect("a árvore do pai existe");
+            let node = match context {
+                Some(context) => taffy.new_leaf_with_context(style, context),
+                None => taffy.new_leaf(style),
+            }
+            .expect("o taffy não falha ao criar nós");
+            self.nodes.insert(id, (pane, node));
+            self.touch(pane);
+            relinked.push(id);
+        }
+        let moved_parents = changes
+            .moved
+            .iter()
+            .filter_map(|&id| layout_parent(tree, id));
         let mut parents: Vec<NodeId> = changes
             .parents
             .iter()
             .chain(&changes.added)
-            .filter_map(|&id| {
+            .copied()
+            .chain(moved_parents)
+            .chain(relinked)
+            .filter_map(|id| {
                 if tree.widget(id).fragment() {
                     layout_parent(tree, id)
                 } else {
@@ -217,6 +243,34 @@ impl LayoutEngine {
             self.relink(tree, id);
         }
         self.dirty = true;
+    }
+
+    /// Tira do taffy os nós de `id` e dos filhos que ficam na mesma árvore, guardando o estilo e
+    /// a medida em `out` (o pai antes dos filhos). As camadas e o conteúdo de um `ScrollViewer`
+    /// ou de um contêiner com a árvore dele ficam onde estão: têm árvore própria.
+    fn lift(&mut self, tree: &Tree, id: NodeId, out: &mut Vec<(NodeId, Style, Option<Leaf>)>) {
+        if self.layers.contains_key(id) {
+            return;
+        }
+        if !tree.widget(id).fragment() {
+            let Some((pane, node)) = self.nodes.remove(id) else {
+                return;
+            };
+            let Some(taffy) = self.taffy(pane) else {
+                return;
+            };
+            let style = taffy.style(node).expect("o nó existe").clone();
+            let context = taffy.get_node_context(node).cloned();
+            taffy.remove(node).expect("o nó existe");
+            self.touch(pane);
+            out.push((id, style, context));
+            if self.panes.contains_key(id) {
+                return;
+            }
+        }
+        for &child in tree.children(id) {
+            self.lift(tree, child, out);
+        }
     }
 
     /// Cria o nó de `id`, sem os filhos.

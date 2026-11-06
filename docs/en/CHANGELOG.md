@@ -7,6 +7,14 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Added
 
+- `Reuse::new(key, || view)`: inside a `Show` or `For` that remounts, the part whose key matches one
+  that left in the same swap comes back whole (widgets, state, focus, signals), without creating the
+  view again.
+- `TerminalPanes::on_close_pane(|pane| ...)` lets the app decide what "close the pane" does for a pane
+  with tabs, and `focus_active_pane(layout)` gives focus back to the active pane's terminal.
+- `effect_named("name", f)`, `profile_effects`, `take_effect_totals` and the `efeitos mais caros` line
+  in the stall log.
+
 - `TabView::tab_visible(|key| bool)`: a tab whose (reactive) closure returns `false` leaves the
   strip, Ctrl+Tab, the arrow keys and the equal-width layout, and its panel stays mounted, only
   hidden. If the selected tab disappears, the selection moves to its neighbor; with
@@ -98,6 +106,14 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Changed
 
+- `TerminalPanes` splits a pane without recreating the terminals, and the tabs' context menu is only
+  created when first opened: until then its items aren't in the tree, and a `.shortcut()` on them has
+  no effect. The grid no longer remounts the focus of whoever already had it (snapshots
+  `m23_grade_3x3_*`).
+- Less work per frame: wake-ups merge into one frame per window, `Inbox` only wakes the UI when the
+  queue goes from empty to having bytes, hidden tabs are read every 100 ms and idle animators report
+  how long is left (`Widget::ticking_in`).
+
 - An empty `TitleBar::subtitle` disappears and leaves no space, like WinUI's `Collapsed`: a
   closure can show the subtitle only when it makes sense.
 - `TestApp` passes the `Form` title to the window on every frame, like the runner: a title that
@@ -106,6 +122,10 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
   instead of cutting off the bottom items.
 
 ### Fixed
+
+- `dialogs::save_file()` with a filter puts the first filter's first extension on a name without one:
+  the Linux portal and zenity saved the name as typed, and the file vanished from the filter on open.
+- An Ed25519 `.ppk` with a leading zero in the seed (one key in 512) didn't open.
 
 - Slowness with many tabs and windows: `Tree::deadline` first asks whether an animator is
   running, and only then whether it is shown, as `advance` already did. Before, every loop turn
