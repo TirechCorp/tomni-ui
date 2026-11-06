@@ -351,14 +351,21 @@ fn no_toque_o_arrasto_comeca_ao_segurar() {
     app.ui().pointer_down(app_, PointerKind::Touch, 1);
     app.frame();
     app.wait(HOLD_DELAY);
-    assert!(!app.is_open("menu-app"), "o menu espera o dedo sair");
+    // O menu da aba só é criado na primeira abertura: não existir é não ter aberto.
+    assert!(
+        app.ui().find("menu-app").is_none(),
+        "o menu espera o dedo sair"
+    );
     app.ui().pointer_move(destino, PointerKind::Touch);
     app.frame();
     assert_eq!(app.drag_label().as_deref(), Some("app"));
     app.ui().pointer_up(destino, PointerKind::Touch);
     app.frame();
     assert_eq!(*chamadas.borrow(), [(0, 2)]);
-    assert!(!app.is_open("menu-app"));
+    assert!(
+        app.ui().find("menu-app").is_none(),
+        "o arrasto não abre o menu"
+    );
 
     // Segurando sem andar, o dedo sai e o menu de contexto abre.
     let erro = centro(app.rect("logs-erro"));

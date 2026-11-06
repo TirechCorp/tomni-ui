@@ -200,6 +200,13 @@ pub trait Widget: 'static {
         false
     }
 
+    /// A chave de um [`Reuse`](crate::Reuse): quando o contêiner de cima é montado de novo, a
+    /// subárvore de antes com a mesma chave volta no lugar novo, com o estado, em vez de ser
+    /// criada do zero.
+    fn reuse_key(&self) -> Option<&str> {
+        None
+    }
+
     /// Lê, num fragmento, os valores reativos de que os filhos dependem. A árvore chama dentro
     /// de um efeito e, quando um deles muda, chama [`Widget::reconcile`].
     fn track_children(&self) {}
@@ -260,6 +267,15 @@ pub trait Widget: 'static {
     /// [`Widget::tick`] nem mantém o loop de frame acordado.
     fn ticking(&self) -> bool {
         true
+    }
+
+    /// Num widget que anima e está parado agora ([`Widget::ticking`] falso), quanto falta para o
+    /// tempo voltar a passar nele: o loop de frame acorda nessa hora e consulta o `ticking` de
+    /// novo. Serve a quem trabalha num ritmo mais lento que o dos quadros (o `TerminalPanes` lê
+    /// as abas escondidas a cada 100 ms). `None` (o padrão): só um [`wake`](crate::wake) ou
+    /// outra mudança o põe de novo para andar.
+    fn ticking_in(&self) -> Option<Duration> {
+        None
     }
 
     /// Passa `dt` de tempo na animação. A fase entra no [`Widget::look`], e a árvore põe o
@@ -364,8 +380,9 @@ pub trait Widget: 'static {
         None
     }
 
-    /// Se o widget pede o foco ao ser criado (o campo de renomear do `TreeView`). A árvore
-    /// tenta como o [`EventCx::focus_later`], depois do layout.
+    /// Se o widget pede o foco ao ser criado (o campo de renomear do `TreeView`) ou quando um
+    /// [`Reuse`](crate::Reuse) o leva para outro lugar. A árvore tenta como o
+    /// [`EventCx::focus_later`], depois do layout.
     fn focus_on_mount(&self) -> bool {
         false
     }

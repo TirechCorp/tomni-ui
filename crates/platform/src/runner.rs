@@ -33,6 +33,11 @@ use crate::frames::{FrameTrace, Pacer, Reason, SurfaceFailures};
 use crate::render_guard::{Mode, RenderGuard};
 use crate::{Backdrop, Blink, ClickCounter, Error, Handler, WindowOptions, keys};
 
+/// O intervalo mínimo entre dois frames de despertares ([`tomni_ui_core::wake`]) na mesma
+/// janela: uns 60 por segundo, como as animações. Uma saída pesada chama o `wake` a cada pedaço
+/// lido, e cada um virava um frame (e um desenho) em todas as janelas.
+const WAKE_GAP: Duration = tomni_ui_core::ANIMATION_FRAME;
+
 /// Pixels rolados por um dente da roda do mouse: três linhas de 16 px, o padrão do Windows.
 const WHEEL_LINE: f64 = 48.0;
 
@@ -166,6 +171,12 @@ struct Janela<H> {
     /// Uma thread chamou [`tomni_ui_core::wake`]: o próximo `about_to_wait` roda o frame, que
     /// aplica o que ela mudou (signals, efeitos) mesmo sem nada animando.
     woken: bool,
+    /// Quando o `about_to_wait` rodou o último frame: os despertares seguintes esperam o
+    /// [`WAKE_GAP`] passar.
+    last_frame: Option<Instant>,
+    /// Quando o prazo do `handler` ([`Handler::deadline`]) vence: o tempo só passa nele, ou
+    /// num despertar.
+    tick_at: Option<Instant>,
     /// Falhas seguidas ao pegar a textura da superfície.
     failures: SurfaceFailures,
     /// A superfície se perdeu e não deu para recriar: tenta de novo no próximo redesenho.
@@ -524,6 +535,8 @@ impl<H: Handler> Janela<H> {
             clicks: ClickCounter::new(),
             blink: Blink::new(),
             woken: false,
+            last_frame: None,
+            tick_at: None,
             failures: SurfaceFailures::default(),
             lost: false,
             trace: FrameTrace::new(Instant::now()),
@@ -831,17 +844,21 @@ impl<H: Handler> Janela<H> {
         self.window.set_cursor(icon);
     }
 
-    /// Passa ao `handler` o tempo desde a última vez, se ele estiver contando algo. Retorna se
-    /// passou.
-    fn tick(&mut self, now: Instant) -> bool {
+    /// Passa ao `handler` o tempo desde a última vez, se ele estiver contando algo e `due` (o
+    /// prazo venceu, ou um despertar pede para olhar de novo). Retorna se passou. Sem prazo, o
+    /// relógio acompanha a hora: o tempo parado não conta para a animação que começar.
+    fn tick(&mut self, now: Instant, due: bool) -> bool {
+        if self.handler.deadline().is_none() {
+            self.clock = now;
+            return false;
+        }
+        if !due {
+            return false;
+        }
         let dt = now.saturating_duration_since(self.clock);
         self.clock = now;
-        if self.handler.deadline().is_some() {
-            self.handler.advance(dt);
-            true
-        } else {
-            false
-        }
+        self.handler.advance(dt);
+        true
     }
 
     fn sync_ime(&mut self, text_input: Option<TextInput>) {
@@ -1102,8 +1119,10 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
         let now = Instant::now();
         let handle = self.windows[i].handle;
         windows::set_current(handle);
-        // O evento pode começar uma contagem: ela vale a partir de agora.
-        self.windows[i].tick(now);
+        // O evento pode começar uma contagem: ela vale a partir de agora. O tempo de uma que já
+        // conta só passa no prazo dela.
+        let due = self.windows[i].tick_at.is_some_and(|at| at <= now);
+        self.windows[i].tick(now, due);
         let janela = &mut self.windows[i];
         if is_input(&event) {
             janela.input(now);
@@ -1361,10 +1380,23 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
             if let Some(held) = janela.pacer.release(now) {
                 janela.request_redraw(held);
             }
-            let mut reason = std::mem::take(&mut janela.woken).then_some(Reason::Event);
+            // Os despertares de uma saída pesada viram no máximo um frame a cada `WAKE_GAP`: o
+            // que chegou no meio entra no seguinte.
+            let woken = janela.woken
+                && janela
+                    .last_frame
+                    .is_none_or(|last| now.saturating_duration_since(last) >= WAKE_GAP);
+            if janela.woken && !woken {
+                deadlines.extend(janela.last_frame.map(|last| last + WAKE_GAP));
+            }
+            if woken {
+                janela.woken = false;
+            }
+            let mut reason = woken.then_some(Reason::Event);
             let due = {
                 let _prazos = stages::stage("prazos");
-                janela.tick(now)
+                let due = woken || janela.tick_at.is_some_and(|at| at <= now);
+                janela.tick(now, due)
             };
             if due {
                 reason = Some(Reason::Deadline);
@@ -1383,13 +1415,15 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
                 janela.handler.set_caret_visible(janela.blink.visible());
                 reason = Some(Reason::Blink);
             }
-            if let Some(reason) = reason
-                && {
+            if let Some(reason) = reason {
+                janela.last_frame = Some(now);
+                let changed = {
                     let _quadro = stages::stage("quadro");
                     janela.handler.frame()
+                };
+                if changed {
+                    janela.request_redraw(reason);
                 }
-            {
-                janela.request_redraw(reason);
             }
             if janela.trace.on()
                 && let Some(line) = janela.trace.flush(now, &format!("{:?}", janela.handle))
@@ -1398,12 +1432,11 @@ impl<H: Handler, F: FnMut(OpenWindow) -> Option<H>> ApplicationHandler for Runne
             }
             let pacer = &janela.pacer;
             deadlines.extend(janela.blink.deadline().map(|at| pacer.clamp(at)));
-            deadlines.extend(
-                janela
-                    .handler
-                    .deadline()
-                    .map(|left| pacer.clamp(now + left.max(Duration::from_millis(1)))),
-            );
+            janela.tick_at = janela
+                .handler
+                .deadline()
+                .map(|left| pacer.clamp(now + left.max(Duration::from_millis(1))));
+            deadlines.extend(janela.tick_at);
         }
         event_loop.set_control_flow(match deadlines.into_iter().min() {
             Some(deadline) => ControlFlow::WaitUntil(deadline),

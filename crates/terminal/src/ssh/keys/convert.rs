@@ -158,13 +158,16 @@ impl KeyFile {
         if info.encrypted && passphrase.is_none() {
             return Err(KeyError::NeedsPassphrase);
         }
-        let mut key = decode_secret_key(text, passphrase).map_err(|error| {
-            if info.encrypted {
-                KeyError::WrongPassphrase
-            } else {
-                KeyError::Invalid(error.to_string())
-            }
-        })?;
+        let mut key = match decode_secret_key(text, passphrase) {
+            Ok(key) => key,
+            Err(error) => ppk::read_ed25519(text, passphrase).ok_or_else(|| {
+                if info.encrypted {
+                    KeyError::WrongPassphrase
+                } else {
+                    KeyError::Invalid(error.to_string())
+                }
+            })?,
+        };
         if key.comment().is_empty() && !info.comment.is_empty() {
             key.set_comment(info.comment.clone());
         }

@@ -32,7 +32,10 @@ use reactive_graph::owner::LocalStorage;
 pub use reactive_graph::traits::{
     Get, GetUntracked, Set, Track, Update, UpdateUntracked, With, WithUntracked,
 };
-pub use runtime::{Scope, init, live_tasks, on_cleanup, run_effects};
+pub use runtime::{
+    EffectOrigin, EffectTotal, Scope, init, live_tasks, on_cleanup, profile_effects, run_effects,
+    take_effect_totals,
+};
 
 /// Roda `f` sem registrar dependências: o que for lido dentro não faz o efeito ou memo atual
 /// rodar de novo.
@@ -69,14 +72,22 @@ where
 /// novo sempre que um valor lido nele mudar; é descartado junto com o [`Scope`] atual.
 #[track_caller]
 pub fn effect(f: impl FnMut() + 'static) -> Effect {
-    Effect::new(f)
+    let origin = runtime::EffectOrigin::Code(std::panic::Location::caller());
+    runtime::with_origin(origin, || Effect::new(f))
+}
+
+/// Como [`effect()`], com um nome no lugar da linha que o criou, na medição dos efeitos
+/// ([`profile_effects`]). A árvore de widgets usa o tipo do widget (`terminal`, `text`): o efeito
+/// de cada nó nasce na mesma linha, e a linha não diria de quem é o tempo.
+pub fn effect_named(name: &'static str, f: impl FnMut() + 'static) -> Effect {
+    runtime::with_origin(runtime::EffectOrigin::Named(name), || Effect::new(f))
 }
 
 /// Tudo o que uma view precisa: `use tomni_ui_reactive::prelude::*`.
 pub mod prelude {
     pub use crate::{
-        Get, GetUntracked, Memo, Scope, Set, Signal, Update, With, WithUntracked, effect, memo,
-        on_cleanup, run_effects, signal, untrack,
+        Get, GetUntracked, Memo, Scope, Set, Signal, Update, With, WithUntracked, effect,
+        effect_named, memo, on_cleanup, run_effects, signal, untrack,
     };
 }
 

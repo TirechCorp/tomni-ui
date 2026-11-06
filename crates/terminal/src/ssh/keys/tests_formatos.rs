@@ -741,3 +741,125 @@ fn write_key_text_grava_atomico_com_a_permissao_certa() {
         );
     }
 }
+
+/// Uma chave Ed25519 da semente `primeiros` seguida de bytes fixos.
+fn ed25519_da_semente(primeiros: &[u8]) -> PrivateKey {
+    let mut semente = [7u8; 32];
+    semente[..primeiros.len()].copy_from_slice(primeiros);
+    PrivateKey::from(ssh_key::private::Ed25519Keypair::from_seed(&semente))
+}
+
+#[test]
+fn a_semente_ed25519_de_qualquer_comeco_volta_do_ppk() {
+    // O `.ppk` guarda a semente como um `string` de 32 bytes (é o que o `puttygen` faz), e o leitor
+    // do `ssh-key` a lê como `mpint`, que recusa um zero à esquerda sem o bit seguinte ligado: uma
+    // em cada 512 chaves dava "A passphrase não confere" com a passphrase certa.
+    for primeiros in [
+        &[0x00, 0x01][..],
+        &[0x00, 0x7f],
+        &[0x00, 0x00, 0x00],
+        &[0x00, 0x80],
+        &[0x80],
+        &[0xff],
+    ] {
+        let chave = ed25519_da_semente(primeiros);
+        for (formato, senha) in [
+            (PrivateFormat::PpkV3, Some(SENHA)),
+            (PrivateFormat::PpkV3, None),
+            (PrivateFormat::PpkV2, Some(SENHA)),
+            (PrivateFormat::PpkV2, None),
+        ] {
+            let texto = export_private(&chave, formato, senha, KdfLevel::Standard).unwrap();
+            let aberta = KeyFile::from_text(&texto, senha)
+                .unwrap_or_else(|erro| panic!("{primeiros:x?} em {formato:?}: {erro}"));
+            assert_eq!(
+                aberta.private_key().to_bytes().unwrap(),
+                chave.to_bytes().unwrap(),
+                "{primeiros:x?} em {formato:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_semente_recusada_pelo_leitor_ainda_confere_a_passphrase_e_o_mac() {
+    let chave = ed25519_da_semente(&[0x00, 0x01]);
+    let texto = export_private(
+        &chave,
+        PrivateFormat::PpkV3,
+        Some(SENHA),
+        KdfLevel::Standard,
+    )
+    .unwrap();
+    assert!(matches!(
+        KeyFile::from_text(&texto, Some("errada")),
+        Err(KeyError::WrongPassphrase)
+    ));
+    assert!(matches!(
+        KeyFile::from_text(&texto, None),
+        Err(KeyError::NeedsPassphrase)
+    ));
+    let adulterado = texto.replace("Comment: ", "Comment: x");
+    assert!(KeyFile::from_text(&adulterado, Some(SENHA)).is_err());
+    // A leitura da semente é só do Ed25519.
+    let outra = PrivateKey::random(
+        &mut rand::rng(),
+        ssh_key::Algorithm::Ecdsa {
+            curve: ssh_key::EcdsaCurve::NistP256,
+        },
+    )
+    .unwrap();
+    let texto = export_private(&outra, PrivateFormat::PpkV3, None, KdfLevel::Standard).unwrap();
+    assert!(ppk::read_ed25519(&texto, None).is_none());
+}
+
+#[test]
+fn o_login_abre_o_arquivo_da_semente_recusada_pelo_leitor() {
+    let pasta = std::env::temp_dir().join(format!("tomni-ppk-login-{}", std::process::id()));
+    fs::create_dir_all(&pasta).unwrap();
+    let arquivo = pasta.join("chave.ppk");
+    let chave = ed25519_da_semente(&[0x00, 0x01]);
+    let texto = export_private(
+        &chave,
+        PrivateFormat::PpkV3,
+        Some(SENHA),
+        KdfLevel::Standard,
+    )
+    .unwrap();
+    fs::write(&arquivo, texto.as_bytes()).unwrap();
+    let abrir = |senha: &str| {
+        crate::ssh::open_key(&crate::ssh::KeySource::File(
+            arquivo.clone(),
+            Some(senha.to_owned()),
+        ))
+    };
+    let aberta = abrir(SENHA).unwrap();
+    assert_eq!(aberta.to_bytes().unwrap(), chave.to_bytes().unwrap());
+    assert!(abrir("errada").is_err());
+    fs::remove_dir_all(&pasta).unwrap();
+}
+
+#[test]
+fn os_vetores_do_puttygen_tambem_abrem_pela_leitura_da_semente() {
+    let mut lidos = 0;
+    for (nome, senha, esperado) in PRIVADAS {
+        let texto = vetor(nome);
+        if !texto.starts_with("PuTTY-User-Key-File-") || !texto.contains("ssh-ed25519") {
+            continue;
+        }
+        let chave = ppk::read_ed25519(&texto, senha).unwrap_or_else(|| panic!("{nome}"));
+        assert_eq!(
+            chave.fingerprint(HashAlg::Sha256).to_string(),
+            fp_do_vetor(esperado),
+            "{nome}"
+        );
+        if senha.is_some() {
+            assert!(
+                ppk::read_ed25519(&texto, Some("errada")).is_none(),
+                "{nome}"
+            );
+        }
+        lidos += 1;
+    }
+    assert!(lidos >= 2, "os vetores Ed25519 sumiram: {lidos}");
+}

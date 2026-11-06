@@ -1603,7 +1603,9 @@ async fn authenticate_with_password(
 fn open_key(source: &KeySource) -> Result<PrivateKey, String> {
     match source {
         KeySource::File(path, passphrase) => {
-            load_secret_key(path, passphrase.as_deref()).map_err(|error| {
+            let aberta = load_secret_key(path, passphrase.as_deref())
+                .or_else(|error| keys::open_unusual_ppk(path, passphrase.as_deref()).ok_or(error));
+            aberta.map_err(|error| {
                 let path = path.display();
                 match error {
                     russh::keys::Error::KeyIsEncrypted => {

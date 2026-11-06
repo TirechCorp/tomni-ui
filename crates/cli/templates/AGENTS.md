@@ -830,6 +830,13 @@ Show::when(move || tarefas.with(Vec::is_empty), || Text::new("Nada aqui").id("va
 
 Para só esconder, guardando o estado (o texto de um `Edit`), use `.visible(prop)`.
 
+Quando o `Show` (ou o `For`) monta de novo uma estrutura que muda de forma mas tem as mesmas
+partes, embrulhe cada parte num `Reuse::new(chave, || view)`: um `Reuse` que entra com a chave de
+um que sai leva a subárvore de antes para o lugar novo (widgets, estado, foco, signals), e a view
+não é criada de novo. A chave vale só entre os que saem e entram na mesma troca, e o contêiner em
+volta deve ser como o de antes (a parte leva o layout dela). É assim que o `TerminalPanes`
+divide um painel sem recriar os terminais.
+
 **Rolagem**: conteúdo que não cabe vai num `ScrollViewer`. Numa `Column`, com `.grow(1)`, ele
 fica com a altura que sobra e o resto da tela continua no lugar:
 
@@ -1219,6 +1226,10 @@ Button::new("Escolher…").on_click(move || {
   `SettingsIdentifier` do WinUI), no lugar do `.directory(..)`, que fica valendo enquanto não há
   pasta lembrada. A lib guarda na memória; para lembrar entre execuções, o app instala um
   `dialogs::FolderMemory` com `dialogs::set_folder_memory(..)`.
+- No `save_file` com `.filter(..)`, um nome digitado **sem extensão** ganha a primeira extensão
+  do primeiro filtro (`backup` vira `backup.json`), como o `SetDefaultExtension` do Windows: o
+  portal do Linux e o zenity gravam o nome como foi digitado, e o arquivo some do filtro na hora
+  de abrir. Nome com extensão, arquivo oculto (`.bashrc`) e filtro `*` ficam como estão.
 - `dialogs::pick_folder()` escolhe uma **pasta** que existe (`.title(..)` e `.directory(..)`
   valem; os filtros e o nome sugerido não).
 - O callback do `.show(..)` roda na thread da interface, **no frame seguinte**, não dentro do
@@ -1449,7 +1460,10 @@ tecla Menu ou o toque longo, junto do widget. Vale o `.context_flyout` do widget
 sob o mouse que tenha um; os itens com `.shortcut()` valem como atalhos mesmo com o menu
 fechado. O `Terminal` sem menu de contexto cola com o botão direito, como antes. Nas abas:
 `TabView::tab_context_flyout(|chave| MenuFlyout::new()...)` dá um menu a cada aba (os ids dos
-menus ficam por sua conta; use `format!("menu-{chave}")`).
+menus ficam por sua conta; use `format!("menu-{chave}")`). O menu de cada aba só é criado quando
+abre pela primeira vez: antes disso os itens dele não existem na árvore (um `app.click` no item
+pede o `app.right_click("aba")` antes), e um `.shortcut()` neles não vale com o menu fechado; ponha
+os atalhos num menu que já existe (o da barra, o de um botão).
 
 **Arrastar e soltar** (dentro da janela): só o `TabView` arrasta por enquanto. Com
 `.on_reorder(move |de, para| ...)`, uma aba arrasta depois de andar 4 px (antes disso é um
@@ -1812,8 +1826,10 @@ Para um programa seu, implemente `tomni_ui::terminal::Transport` (`write`, `read
 até `INBOX_LIMIT` (1 MiB) do que chegou e a interface ainda não leu: a thread que lê o programa
 usa `inbox.push_wait(&bytes)`, que espera vaga (o programa que despeja sem fim fica esperando,
 como num terminal de verdade, e a memória não cresce), ou confere `inbox.has_room()` antes de ler
-mais; `push` não espera (mensagens curtas, avisos). No `Drop` do transporte, chame
-`inbox.detach()`: solta a thread que espera vaga e descarta o que vier depois.
+mais; `push` não espera (mensagens curtas, avisos). Os dois só acordam a interface quando a fila
+passa de vazia para com bytes: enquanto há o que ler, o terminal lê sozinho a cada quadro. No
+`Drop` do transporte, chame `inbox.detach()`: solta a thread que espera vaga e descarta o que
+vier depois.
 
 Builders: `.id(id)`, `.grow(1)` ou `.width(n)`/`.height(n)`, `.cols_rows(80, 24)` (grade fixa;
 sem ele, a grade segue o tamanho do widget, no mínimo 20 × 5), `.font_size(n)` (Cascadia
@@ -2032,7 +2048,8 @@ pub fn tela() -> impl View {
   notificação do sistema), `notify(Notice)` dá um aviso como se o programa o mandasse (para quem
   sabe do programa por outro caminho, como um gancho), `attention()` diz se há aviso não visto e
   `mark_seen()` o apaga. O
-  `TerminalPanes` liga isso às abas sozinho: anel de progresso, ponto de atenção (que some ao
+  `TerminalPanes` liga isso às abas sozinho (as abas escondidas são lidas a cada 100 ms, ou a
+  cada quadro quando chega mais do que cabe numa leitura): anel de progresso, ponto de atenção (que some ao
   escolher a aba, estando a janela com o foco) e o pedido de atenção da janela
   (`WindowHandle::request_attention()`) quando o aviso chega com a janela sem o foco.
   `terminal_panes.activity()` soma tudo (`PanesActivity { progress: Option<f64>, busy,
@@ -2744,6 +2761,11 @@ fn secundaria(contador: Signal<i32>) -> impl View {
   fechada), `app.set_active_window(janela)`, `app.drag_tab_to_window("aba", janela, "alvo")`,
   `app.drag_tab_outside("aba")` e `.without_window_positions()` (o Wayland). Um pedido de
   `open_window` vira janela depois de `app.frame()`.
+  `TerminalPanes::on_close_pane(|painel| ...)` deixa o app decidir o "fechar o painel" do atalho
+  quando o painel tem abas (perguntar, mover as abas para outro lugar): a lib só avisa e nada
+  fecha; o painel vazio fecha direto. E quem muda o layout de fora (um painel fechado leva junto
+  o terminal que tinha o foco) chama `focus_active_pane(layout)`, que devolve o foco ao terminal
+  do painel ativo.
 
 ## Estado reativo
 
@@ -2974,7 +2996,10 @@ etapa passou de meio segundo, escreve o tempo por etapa; o aviso do ritmo limita
 para lá. O estado do sistema só aparece no Linux; o arquivo recomeça acima de 1 MiB. Sem o
 `stall_log`, nada é medido. Para marcar uma etapa sua (uma conta pesada num efeito), use
 `let _etapa = tomni_ui::stages::stage("minha conta");`: o guarda fecha a etapa ao sair de
-escopo, e ela aparece dentro da etapa em que estava (`ciclo › prazos › minha conta`).
+escopo, e ela aparece dentro da etapa em que estava (`ciclo › prazos › minha conta`). No mesmo
+minuto pesado, a linha `efeitos mais caros` diz quais efeitos gastaram mais, pela linha do
+código que chamou `effect(..)` (`app/src/abas.rs:120`) ou pelo tipo do widget (`terminal`,
+`tab`); `effect_named("nome", move || ..)` dá um nome no lugar da linha.
 
 ## Erros comuns
 

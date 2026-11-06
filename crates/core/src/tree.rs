@@ -8,12 +8,13 @@ use std::time::Duration;
 
 use kurbo::{Point, Rect, Size, Vec2};
 use slotmap::{SecondaryMap, SlotMap};
-use tomni_ui_reactive::{Scope, effect, untrack};
+use tomni_ui_reactive::{Scope, effect_named, untrack};
 
 use crate::cx::{Clipboard, EventCx, FixedMetrics, FocusMove, MemoryClipboard, TextMetrics};
 use crate::density::Density;
 use crate::drag::{DRAG_THRESHOLD, DragData};
 use crate::event::{Cursor, Event, FocusSource, Ime, Key, Modifiers, PointerKind};
+use crate::flyout::ContextMenu;
 use crate::scroll_viewer::{SCROLL_LINE, ScrollMode, Scroller};
 use crate::shortcut::Shortcut;
 use crate::title_bar::{PaneLink, WindowRequest, WindowState};
@@ -60,6 +61,9 @@ struct Node {
     tooltip: Option<NodeId>,
     /// O menu de contexto do widget (`.context_flyout()`), filho dele.
     context: Option<NodeId>,
+    /// O menu de contexto que só é feito quando abrir pela primeira vez (o das abas do
+    /// `TabView`); depois de montado, vai para `context`.
+    context_later: Option<Box<dyn FnOnce() -> Box<dyn Widget>>>,
     /// Ponto da janela onde a camada abriu (o menu de contexto aberto pelo botão direito),
     /// no lugar do retângulo da origem.
     anchor: Option<Rect>,
@@ -140,12 +144,18 @@ pub struct Changes {
     pub removed: Vec<NodeId>,
     /// Fragmentos (`Show`, `For`) cujos filhos mudaram.
     pub parents: Vec<NodeId>,
+    /// Subárvores de um [`Reuse`](crate::Reuse) que mudaram de pai, com o estado: não estão
+    /// em `added` nem em `removed`. O pai vem antes dos filhos.
+    pub moved: Vec<NodeId>,
 }
 
 impl Changes {
     /// Se nada mudou.
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.removed.is_empty() && self.parents.is_empty()
+        self.added.is_empty()
+            && self.removed.is_empty()
+            && self.parents.is_empty()
+            && self.moved.is_empty()
     }
 }
 
@@ -239,6 +249,14 @@ pub struct Tree {
     drag: Option<Drag>,
     /// Alvo sob o ponteiro de um arrasto que veio de outra janela ([`Tree::foreign_drag_over`]).
     foreign_target: Option<NodeId>,
+    /// Os [`Reuse`](crate::Reuse) que estão saindo na reconciliação em andamento, pela chave:
+    /// um novo com a mesma chave fica com a subárvore.
+    parked: std::collections::HashMap<String, NodeId>,
+    /// Widgets montados fora do [`Tree::reconcile`] (o menu de contexto feito na primeira
+    /// abertura), que o próximo leva ao layout.
+    late_added: Vec<NodeId>,
+    /// As subárvores que um `Reuse` novo adotou desde a última reconciliação.
+    moved: Vec<NodeId>,
 }
 
 impl Tree {
@@ -291,6 +309,9 @@ impl Tree {
             escaping: false,
             drag: None,
             foreign_target: None,
+            parked: std::collections::HashMap::new(),
+            late_added: Vec::new(),
+            moved: Vec::new(),
         };
         let scope = tree.scope.child();
         tree.root = tree.add(root, None, scope, &mut Vec::new());
@@ -307,6 +328,17 @@ impl Tree {
         scope: Scope,
         added: &mut Vec<NodeId>,
     ) -> NodeId {
+        let reuse = widget.reuse_key().map(str::to_owned);
+        if let Some(old) = reuse.as_ref().and_then(|key| self.parked.remove(key)) {
+            return self.adopt(old, parent);
+        }
+        // O escopo do `Reuse` não é filho do de quem o montou: a subárvore pode ir para outro
+        // pai e sobreviver à montagem de antes.
+        let scope = if reuse.is_some() {
+            Scope::detached()
+        } else {
+            scope
+        };
         let inherited = parent.map_or(Density::Standard, |p| self.nodes[p].density);
         let density = widget.density().unwrap_or(inherited);
         widget.set_density(density);
@@ -352,6 +384,7 @@ impl Tree {
             layer,
             tooltip: None,
             context: None,
+            context_later: None,
             anchor: None,
             animates,
             watches,
@@ -363,8 +396,11 @@ impl Tree {
         let weak: Weak<RefCell<Box<dyn Widget>>> = Rc::downgrade(&widget);
         let dirty = Rc::clone(&self.dirty);
         let structure = fragment.then(|| Rc::clone(&self.structure));
+        // O efeito de cada nó nasce nesta mesma linha: na medição dos efeitos, ele leva o tipo do
+        // widget, para o registro de travamentos dizer de quem é o tempo.
+        let kind = widget.borrow().kind();
         scope.run(|| {
-            effect(move || {
+            effect_named(kind, move || {
                 if let Some(widget) = weak.upgrade() {
                     // Só para registrar as dependências: o `Look`, a visibilidade e os filhos
                     // são lidos de novo no frame.
@@ -394,16 +430,52 @@ impl Tree {
             self.nodes[id].children.push(child);
             self.nodes[id].tooltip = Some(child);
         }
-        if let Some(menu) = context {
-            let child = self.add(menu, Some(id), scope.child(), added);
-            self.nodes[id].children.push(child);
-            self.nodes[id].context = Some(child);
+        match context {
+            Some(ContextMenu::Ready(menu)) => {
+                let child = self.add(menu, Some(id), scope.child(), added);
+                self.nodes[id].children.push(child);
+                self.nodes[id].context = Some(child);
+            }
+            Some(ContextMenu::Later(make)) => self.nodes[id].context_later = Some(make),
+            None => {}
         }
         if fragment {
             let slots = untrack(|| widget.borrow_mut().reconcile()).unwrap_or_default();
             self.apply(id, slots, added, &mut Vec::new());
         }
         id
+    }
+
+    /// Põe a subárvore `id` de um `Reuse` que estava saindo embaixo de `parent`.
+    fn adopt(&mut self, id: NodeId, parent: Option<NodeId>) -> NodeId {
+        if let Some(old) = self.nodes[id].parent
+            && let Some(node) = self.nodes.get_mut(old)
+        {
+            node.children.retain(|&child| child != id);
+        }
+        self.nodes[id].parent = parent;
+        self.moved.push(id);
+        id
+    }
+
+    /// Os `Reuse` de fora dentro de `id` (o próprio `id`, se for um), para [`Tree::adopt`].
+    fn park(&mut self, id: NodeId, parked: &mut Vec<String>) {
+        let key = self.nodes[id]
+            .widget
+            .borrow()
+            .reuse_key()
+            .map(str::to_owned);
+        if let Some(key) = key {
+            if !self.parked.contains_key(&key) {
+                self.parked.insert(key.clone(), id);
+                parked.push(key);
+            }
+            return;
+        }
+        for i in 0..self.nodes[id].children.len() {
+            let child = self.nodes[id].children[i];
+            self.park(child, parked);
+        }
     }
 
     /// Troca os filhos do fragmento `fragment` pela lista `slots`.
@@ -416,6 +488,20 @@ impl Tree {
     ) {
         let old = std::mem::take(&mut self.nodes[fragment].children);
         let mut kept = vec![false; old.len()];
+        // Os `Reuse` dos filhos que saem ficam à espera de um novo com a mesma chave.
+        let staying: Vec<usize> = slots
+            .iter()
+            .filter_map(|slot| match slot {
+                Slot::Keep(i) => Some(*i),
+                Slot::New(_) => None,
+            })
+            .collect();
+        let mut parked = Vec::new();
+        for (i, &child) in old.iter().enumerate() {
+            if !staying.contains(&i) {
+                self.park(child, &mut parked);
+            }
+        }
         let scope = self.nodes[fragment].scope.clone();
         let mut children = Vec::with_capacity(slots.len());
         for slot in slots {
@@ -433,8 +519,12 @@ impl Tree {
                 }
             }
         }
+        for key in parked {
+            self.parked.remove(&key);
+        }
         for (child, kept) in old.into_iter().zip(kept) {
-            if !kept {
+            // Um filho que saiu inteiro para um `Reuse` novo já tem outro pai.
+            if !kept && self.nodes[child].parent == Some(fragment) && !children.contains(&child) {
                 self.remove(child, removed);
             }
         }
@@ -529,7 +619,11 @@ impl Tree {
     /// Itens novos ganham widgets novos, que entram na fila no próximo `run_effects`; os que
     /// saíram são descartados com os efeitos; os que ficaram mantêm o widget e o estado.
     pub fn reconcile(&mut self) -> Changes {
-        let mut changes = Changes::default();
+        let mut changes = Changes {
+            added: std::mem::take(&mut self.late_added),
+            ..Changes::default()
+        };
+        changes.added.retain(|&id| self.nodes.contains_key(id));
         let mut pending = std::mem::take(&mut *self.structure.borrow_mut());
         pending.retain(|&id| self.position.contains_key(id));
         if pending.is_empty() {
@@ -550,8 +644,23 @@ impl Tree {
             }
             self.grant_focus_request(fragment);
         }
+        changes.moved = std::mem::take(&mut self.moved);
         self.reorder();
-        for &id in &changes.added {
+        // Uma subárvore que um `Reuse` levou para outro lugar também conta como montada: o
+        // terminal ativo do `TerminalPanes` pede o foco depois do zoom como pedia ao ser criado.
+        // Pedir o foco de quem já o tem não muda nada.
+        let mut mounted = changes.added.clone();
+        let mut stack: Vec<NodeId> = changes
+            .moved
+            .iter()
+            .copied()
+            .filter(|&id| self.contains(id))
+            .collect();
+        while let Some(id) = stack.pop() {
+            mounted.push(id);
+            stack.extend_from_slice(&self.nodes[id].children);
+        }
+        for id in mounted {
             let widget = self.widget(id);
             if untrack(|| widget.focus_on_mount())
                 && let Some(name) = widget.common().id.clone()
@@ -786,9 +895,17 @@ impl Tree {
         self.nodes[id].anchor
     }
 
-    /// Menu de contexto de `id` (`.context_flyout()`).
+    /// Menu de contexto de `id` (`.context_flyout()`). O das abas do `TabView`
+    /// (`.tab_context_flyout()`) só existe depois de abrir pela primeira vez:
+    /// [`Tree::has_context_flyout`] diz se há um.
     pub fn context_flyout(&self, id: NodeId) -> Option<NodeId> {
         self.nodes[id].context
+    }
+
+    /// Se `id` tem menu de contexto, montado ou ainda por fazer (o das abas do `TabView`, que
+    /// só é feito quando abre).
+    pub fn has_context_flyout(&self, id: NodeId) -> bool {
+        self.nodes[id].context.is_some() || self.nodes[id].context_later.is_some()
     }
 
     /// Comportamento de `id`, se for uma camada ([`Widget::layer`]).
@@ -1706,7 +1823,7 @@ impl Tree {
     fn context_owner(&self, start: Option<NodeId>, at: Option<Point>) -> Option<NodeId> {
         let mut node = start;
         while let Some(id) = node {
-            if self.nodes[id].context.is_some()
+            if self.has_context_flyout(id)
                 && self.shown(id)
                 && untrack(|| self.widget(id).context_available(self.rect(id), at))
             {
@@ -1723,6 +1840,7 @@ impl Tree {
     /// Abre o menu de contexto de `owner`: com o canto no ponto `at` ou, sem ponto, junto do
     /// widget, como um menu de botão.
     pub fn open_context(&mut self, owner: NodeId, at: Option<Point>) {
+        self.mount_context(owner);
         let Some(menu) = self.nodes[owner].context else {
             return;
         };
@@ -1738,6 +1856,22 @@ impl Tree {
         untrack(|| widget.borrow_mut().set_open(true));
         self.dirty.borrow_mut().push(menu);
         self.sync_layers();
+    }
+
+    /// Monta o menu de contexto de `owner` que só é feito na primeira abertura. Os widgets
+    /// novos vão para o layout no próximo [`Tree::reconcile`].
+    fn mount_context(&mut self, owner: NodeId) {
+        let Some(make) = self.nodes[owner].context_later.take() else {
+            return;
+        };
+        let scope = self.nodes[owner].scope.child();
+        let menu = scope.run(|| untrack(make));
+        let mut added = Vec::new();
+        let child = self.add(menu, Some(owner), scope, &mut added);
+        self.nodes[owner].children.push(child);
+        self.nodes[owner].context = Some(child);
+        self.late_added.extend(added);
+        self.reorder();
     }
 
     /// Botão secundário (o direito) pressionado em `point`: [`Event::SecondaryDown`] vai ao
@@ -1765,7 +1899,7 @@ impl Tree {
         // vale o mais profundo.
         let mut node = self.hit(point).or_else(|| self.deepest_at(point));
         while let Some(id) = node {
-            if self.nodes[id].context.is_some()
+            if self.has_context_flyout(id)
                 && self
                     .widget(id)
                     .context_on_secondary_at(self.rect(id), point, self.modifiers)
@@ -2337,37 +2471,29 @@ impl Tree {
     /// [`Widget::autofocus`] ou no primeiro que aceita foco); uma que fechou sai, e o foco volta
     /// para quem o tinha quando ela abriu.
     fn sync_layers(&mut self) {
-        self.overlays = self
-            .layered
-            .iter()
-            .copied()
-            .filter(|&id| {
-                self.nodes[id].layer.is_some_and(|layer| {
-                    !layer.input && !layer.pointer && layer.placement == Placement::Over
-                }) && self.shown(id)
-            })
-            .collect();
-        self.passive = self
-            .layered
-            .iter()
-            .copied()
-            .filter(|&id| {
-                self.nodes[id]
-                    .layer
-                    .is_some_and(|layer| !layer.input && layer.pointer)
-                    && self.shown(id)
-            })
-            .collect();
-        let opened: Vec<NodeId> = self
-            .layered
-            .iter()
-            .copied()
-            .filter(|&id| {
-                self.nodes[id].layer.is_some_and(|layer| layer.input)
-                    && !self.layers.iter().any(|open| open.id == id)
-                    && self.shown(id)
-            })
-            .collect();
+        // Uma passada só: com muitos menus fechados (os dos terminais), o `shown` de cada camada
+        // é a maior parte do custo do frame parado.
+        self.overlays.clear();
+        self.passive.clear();
+        let mut opened: Vec<NodeId> = Vec::new();
+        for &id in &self.layered {
+            let Some(layer) = self.nodes[id].layer else {
+                continue;
+            };
+            let overlay = !layer.input && !layer.pointer && layer.placement == Placement::Over;
+            let passive = !layer.input && layer.pointer;
+            let opening = layer.input && !self.layers.iter().any(|open| open.id == id);
+            if !(overlay || passive || opening) || !self.shown(id) {
+                continue;
+            }
+            if overlay {
+                self.overlays.push(id);
+            } else if passive {
+                self.passive.push(id);
+            } else {
+                opened.push(id);
+            }
+        }
         if let Some(i) = self
             .layers
             .iter()
@@ -2671,15 +2797,28 @@ impl Tree {
     }
 
     /// Quanto falta para algo mudar sozinho: [`ANIMATION_FRAME`] enquanto um widget que anima
-    /// aparece, ou o tempo até a dica em contagem abrir. O loop de frame acorda a tempo.
+    /// aparece, o [`Widget::ticking_in`] de um que está parado, ou o tempo até a dica em
+    /// contagem abrir. O loop de frame acorda a tempo.
     pub fn deadline(&self) -> Option<Duration> {
         // O `ticking` antes do `shown`, como no `advance`: um item de menu parado não roda o
         // `.visible()` dele e o dos ancestrais a cada volta do loop.
-        let animation = self
-            .animators
-            .iter()
-            .any(|&id| self.ticking(id) && self.shown(id))
-            .then_some(ANIMATION_FRAME);
+        let mut animation: Option<Duration> = None;
+        for &id in &self.animators {
+            let next = if self.ticking(id) {
+                Some(ANIMATION_FRAME)
+            } else {
+                untrack(|| self.nodes[id].widget.borrow().ticking_in())
+            };
+            if let Some(next) = next
+                && animation.is_none_or(|soonest| next < soonest)
+                && self.shown(id)
+            {
+                animation = Some(next);
+                if next <= ANIMATION_FRAME {
+                    break;
+                }
+            }
+        }
         let tip = self
             .tip
             .filter(|tip| !tip.open)
@@ -2697,10 +2836,20 @@ impl Tree {
         let mut parts: Vec<String> = self
             .animators
             .iter()
-            .filter(|&&id| self.ticking(id) && self.shown(id))
-            .map(|&id| {
+            .filter_map(|&id| {
+                let later = if self.ticking(id) {
+                    None
+                } else {
+                    Some(untrack(|| self.nodes[id].widget.borrow().ticking_in())?)
+                };
+                if !self.shown(id) {
+                    return None;
+                }
                 let kind = untrack(|| self.nodes[id].widget.borrow().kind());
-                format!("{kind} {id:?}")
+                Some(match later {
+                    None => format!("{kind} {id:?}"),
+                    Some(left) => format!("{kind} {id:?} em {} ms", left.as_millis()),
+                })
             })
             .collect();
         if self
@@ -2794,8 +2943,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AutoSuggestBox, Button, ButtonState, Column, Edit, For, ProgressBar, RadioButtons, Row,
-        ScrollViewer, Show, TabView, Text,
+        AutoSuggestBox, Button, ButtonState, Column, Edit, For, ProgressBar, RadioButtons, Reuse,
+        Row, ScrollViewer, Show, TabView, Text,
     };
 
     const MOUSE: PointerKind = PointerKind::Mouse;
@@ -3137,6 +3286,76 @@ mod tests {
             assert_eq!(names(&tree), ["column", "show", "sair"]);
             run_effects();
             assert!(tree.reconcile().is_empty());
+        });
+        scope.clear();
+    }
+
+    #[test]
+    fn reuse_leva_a_subarvore_inteira_para_a_montagem_nova() {
+        let scope = Scope::root();
+        scope.run(|| {
+            let em_coluna = signal(true);
+            let criadas = Rc::new(Cell::new(0));
+            let contagem = signal(0);
+            let editor = {
+                let criadas = Rc::clone(&criadas);
+                move || {
+                    let criadas = Rc::clone(&criadas);
+                    Reuse::new("editor", move || {
+                        criadas.set(criadas.get() + 1);
+                        // Um signal criado dentro da view: tem de sobreviver à troca.
+                        let cliques = signal(0);
+                        Button::new("Editor").id("ed").on_click(move || {
+                            cliques.update(|n| *n += 1);
+                            contagem.set(cliques.get_untracked());
+                        })
+                    })
+                }
+            };
+            let (a, b) = (editor.clone(), editor);
+            let mut tree = Tree::mount(
+                Box::new(Column::new().child(
+                    Show::when(em_coluna, move || Column::new().id("coluna").child(a())).otherwise(
+                        move || {
+                            Row::new()
+                                .id("linha")
+                                .child(Text::new("ao lado"))
+                                .child(b())
+                        },
+                    ),
+                )),
+                &scope,
+            );
+            run_effects();
+            let antes = tree.find("ed").unwrap();
+            tree.set_focus(Some(antes), FocusSource::Keyboard);
+            untrack(|| tree.key_down(Key::Enter));
+            assert_eq!(contagem.get_untracked(), 1);
+
+            em_coluna.set(false);
+            run_effects();
+            let changes = untrack(|| tree.reconcile());
+            assert!(tree.find("linha").is_some(), "a montagem nova entrou");
+            assert_eq!(tree.find("ed"), Some(antes), "o mesmo nó, não um novo");
+            assert_eq!(criadas.get(), 1, "a view não é criada de novo");
+            assert_eq!(tree.focused(), Some(antes), "o foco fica");
+            assert!(!changes.added.contains(&antes) && !changes.removed.contains(&antes));
+            let reuse = tree.parent(antes).unwrap();
+            assert_eq!(tree.parent(reuse), tree.find("linha"));
+            assert!(
+                changes.moved.contains(&reuse),
+                "o layout fica sabendo: {:?}",
+                changes.moved
+            );
+
+            untrack(|| tree.key_down(Key::Enter));
+            assert_eq!(contagem.get_untracked(), 2, "o signal da view sobreviveu");
+
+            em_coluna.set(true);
+            run_effects();
+            untrack(|| tree.reconcile());
+            assert_eq!(tree.find("ed"), Some(antes));
+            assert_eq!(criadas.get(), 1);
         });
         scope.clear();
     }
@@ -3610,14 +3829,18 @@ mod tests {
                 put(tree, "abas-abas", Rect::new(8.0, 8.0, 392.0, 52.0));
                 put(tree, "abas-a", Rect::new(8.0, 8.0, 108.0, 52.0));
                 put(tree, "abas-b", Rect::new(108.0, 8.0, 208.0, 52.0));
+                // O menu de cada aba só é feito quando abre pela primeira vez.
                 let b = tree.find("abas-b").unwrap();
-                let menu_b = tree.find("menu-b").unwrap();
-                assert_eq!(tree.context_flyout(b), Some(menu_b));
+                assert!(tree.has_context_flyout(b));
+                assert_eq!(tree.context_flyout(b), None);
+                assert!(tree.find("menu-a").is_none() && tree.find("menu-b").is_none());
 
                 tree.secondary_down(Point::new(150.0, 30.0));
                 frame(tree);
+                let menu_b = tree.find("menu-b").unwrap();
+                assert_eq!(tree.context_flyout(b), Some(menu_b));
                 assert!(tree.shown(menu_b));
-                assert!(!tree.shown(tree.find("menu-a").unwrap()));
+                assert!(tree.find("menu-a").is_none());
                 tree.key_down(Key::Enter);
                 frame(tree);
                 assert_eq!(*escolhas.borrow(), ["b"]);
@@ -4260,6 +4483,72 @@ mod tests {
                 put(tree, "esconder", Rect::new(0.0, 0.0, 100.0, 44.0));
                 click(tree, Point::new(50.0, 20.0));
                 assert_eq!(tree.deadline(), None, "oculto, não acorda o loop");
+            },
+        );
+    }
+
+    /// Um animador parado que volta a andar sozinho daqui a pouco ([`Widget::ticking_in`]).
+    struct Lento {
+        common: crate::widget::Common,
+        falta: Duration,
+    }
+
+    impl Widget for Lento {
+        fn kind(&self) -> &'static str {
+            "lento"
+        }
+
+        fn common(&self) -> &crate::widget::Common {
+            &self.common
+        }
+
+        fn look(&self) -> Look {
+            Look::Column
+        }
+
+        fn animating(&self) -> bool {
+            true
+        }
+
+        fn ticking(&self) -> bool {
+            false
+        }
+
+        fn ticking_in(&self) -> Option<Duration> {
+            Some(self.falta)
+        }
+    }
+
+    #[test]
+    fn o_prazo_inclui_o_animador_parado_que_volta_a_andar() {
+        let visivel = signal(true);
+        with_tree(
+            move || {
+                let lento = |id: &str, ms| Lento {
+                    common: crate::widget::Common {
+                        id: Some(id.to_owned()),
+                        ..Default::default()
+                    },
+                    falta: Duration::from_millis(ms),
+                };
+                let mut escondido = lento("escondido", 10);
+                escondido.common.visible =
+                    Some(crate::Prop::Dynamic(Rc::new(move || visivel.get())));
+                Box::new(Column::new().child(lento("devagar", 80)).child(escondido))
+            },
+            move |tree| {
+                assert_eq!(tree.deadline(), Some(Duration::from_millis(10)));
+                visivel.set(false);
+                tree.take_dirty();
+                assert_eq!(
+                    tree.deadline(),
+                    Some(Duration::from_millis(80)),
+                    "o escondido não conta"
+                );
+                assert!(
+                    tree.deadline_reason()
+                        .is_some_and(|reason| reason.contains("lento") && reason.contains("80 ms"))
+                );
             },
         );
     }

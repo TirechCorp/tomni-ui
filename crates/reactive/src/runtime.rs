@@ -5,12 +5,16 @@
 //! [`run_effects`]: nada roda dentro de um `set`, e várias mudanças no mesmo frame viram uma
 //! execução só.
 
-use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, VecDeque};
+use std::fmt;
 use std::future::Future;
+use std::panic::Location;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Wake, Waker};
+use std::time::{Duration, Instant};
 
 use any_spawner::{CustomExecutor, Executor, PinnedFuture, PinnedLocalFuture};
 use reactive_graph::owner::Owner;
@@ -33,6 +37,8 @@ struct Slot {
     generation: u64,
     /// `None` enquanto a tarefa está sendo executada ou depois que terminou.
     task: Option<Task>,
+    /// De onde veio o efeito da tarefa, para a medição ([`profile_effects`]).
+    origin: Option<EffectOrigin>,
 }
 
 #[derive(Default)]
@@ -45,6 +51,105 @@ struct Tasks {
 thread_local! {
     static TASKS: RefCell<Tasks> = RefCell::default();
     static READY: ReadyQueue = Arc::default();
+    /// A origem do efeito sendo criado agora: o `spawn_local` de dentro do `Effect::new` a leva
+    /// para a tarefa.
+    static ORIGIN: Cell<Option<EffectOrigin>> = const { Cell::new(None) };
+    /// O tempo dos efeitos desta chamada de [`run_effects`], antes de ir para o total.
+    static SPENT: RefCell<HashMap<EffectOrigin, (Duration, u32)>> = RefCell::default();
+}
+
+static PROFILING: AtomicBool = AtomicBool::new(false);
+static TOTALS: Mutex<Option<HashMap<EffectOrigin, (Duration, u32)>>> = Mutex::new(None);
+
+/// De onde um efeito veio: a linha que chamou [`effect`](crate::effect()), ou o nome dado em
+/// [`effect_named`](crate::effect_named) (a árvore usa o tipo do widget, como `terminal`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EffectOrigin {
+    /// A linha do código que criou o efeito.
+    Code(&'static Location<'static>),
+    /// O nome dado ao efeito.
+    Named(&'static str),
+}
+
+impl fmt::Display for EffectOrigin {
+    /// A linha sai sem o começo do caminho, a partir da pasta do crate (`core/src/tree.rs:367`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Code(location) => {
+                let file = location.file().replace('\\', "/");
+                let short = file
+                    .rsplit_once("crates/")
+                    .map_or(file.as_str(), |(_, rest)| rest);
+                write!(f, "{short}:{}", location.line())
+            }
+            Self::Named(name) => f.write_str(name),
+        }
+    }
+}
+
+/// O tempo que os efeitos de uma origem gastaram, e quantas vezes rodaram.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectTotal {
+    /// De onde os efeitos vieram.
+    pub origin: EffectOrigin,
+    /// O tempo somado dos `poll` deles.
+    pub time: Duration,
+    /// Quantas vezes rodaram.
+    pub count: u32,
+}
+
+/// Liga (ou desliga) a medição do tempo de cada efeito, para o processo todo: o registro de
+/// travamentos diz quais origens gastaram mais. Desligada (o padrão), custa o teste de um `bool`
+/// por efeito.
+pub fn profile_effects(on: bool) {
+    PROFILING.store(on, Ordering::Release);
+}
+
+/// O tempo dos efeitos por origem desde a última chamada, do que mais gastou para o que menos,
+/// e zera a conta. Vazio com a medição desligada.
+pub fn take_effect_totals() -> Vec<EffectTotal> {
+    let totals = TOTALS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+        .unwrap_or_default();
+    let mut list: Vec<EffectTotal> = totals
+        .into_iter()
+        .map(|(origin, (time, count))| EffectTotal {
+            origin,
+            time,
+            count,
+        })
+        .collect();
+    list.sort_by(|a, b| {
+        b.time
+            .cmp(&a.time)
+            .then_with(|| a.origin.to_string().cmp(&b.origin.to_string()))
+    });
+    list
+}
+
+/// Cria o efeito com `create` marcando a tarefa dele com `origin`.
+pub(crate) fn with_origin<T>(origin: EffectOrigin, create: impl FnOnce() -> T) -> T {
+    let before = ORIGIN.replace(Some(origin));
+    let made = create();
+    ORIGIN.set(before);
+    made
+}
+
+/// Passa o tempo desta chamada de [`run_effects`] para o total que a vigia lê.
+fn flush_spent() {
+    let spent = SPENT.with_borrow_mut(std::mem::take);
+    if spent.is_empty() {
+        return;
+    }
+    let mut totals = TOTALS.lock().unwrap_or_else(PoisonError::into_inner);
+    let totals = totals.get_or_insert_with(HashMap::new);
+    for (origin, (time, count)) in spent {
+        let total = totals.entry(origin).or_default();
+        total.0 += time;
+        total.1 += count;
+    }
 }
 
 struct TaskWaker {
@@ -82,6 +187,7 @@ impl CustomExecutor for FrameExecutor {
             let slot = &mut tasks.slots[index];
             slot.generation += 1;
             slot.task = Some(fut);
+            slot.origin = ORIGIN.take();
             TaskId {
                 index,
                 generation: slot.generation,
@@ -125,22 +231,27 @@ pub fn init() {
 /// sobrar nenhum. Devolve quantas tarefas foram executadas.
 pub fn run_effects() -> usize {
     let ready = READY.with(Arc::clone);
+    let profiling = PROFILING.load(Ordering::Acquire);
     let mut polls = 0;
     loop {
         let next = ready.lock().unwrap_or_else(|e| e.into_inner()).pop_front();
         let Some(id) = next else {
+            if profiling {
+                flush_spent();
+            }
             return polls;
         };
         // Tira a tarefa da tabela para que ela possa criar outras durante o `poll`.
         let task = TASKS.with_borrow_mut(|tasks| {
             let slot = &mut tasks.slots[id.index];
             (slot.generation == id.generation)
-                .then(|| slot.task.take())
+                .then(|| slot.task.take().map(|task| (task, slot.origin)))
                 .flatten()
         });
-        let Some(mut task) = task else {
+        let Some((mut task, origin)) = task else {
             continue;
         };
+        let started = profiling.then(Instant::now);
         let waker = Waker::from(Arc::new(TaskWaker {
             id,
             ready: Arc::clone(&ready),
@@ -150,12 +261,23 @@ pub fn run_effects() -> usize {
             .as_mut()
             .poll(&mut Context::from_waker(&waker))
             .is_pending();
+        if let (Some(started), Some(origin)) = (started, origin) {
+            let took = started.elapsed();
+            SPENT.with_borrow_mut(|spent| {
+                let total = spent.entry(origin).or_default();
+                total.0 += took;
+                total.1 += 1;
+            });
+        }
         if pending {
             TASKS.with_borrow_mut(|tasks| tasks.slots[id.index].task = Some(task));
         } else {
             // Fora do empréstimo: soltar a tarefa pode rodar `on_cleanup`, que pode criar tarefas.
             drop(task);
-            TASKS.with_borrow_mut(|tasks| tasks.free.push(id.index));
+            TASKS.with_borrow_mut(|tasks| {
+                tasks.slots[id.index].origin = None;
+                tasks.free.push(id.index);
+            });
         }
     }
 }

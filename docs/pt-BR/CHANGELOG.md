@@ -7,6 +7,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- `Reuse::new(chave, || view)`: dentro de um `Show` ou `For` que remonta, a parte com a chave de uma
+  que saiu na mesma troca volta inteira (widgets, estado, foco, signals), sem criar a view de novo.
+- `TerminalPanes::on_close_pane(|painel| ...)` deixa o app decidir o "fechar o painel" de um painel
+  com abas, e `focus_active_pane(layout)` devolve o foco ao terminal do painel ativo.
+- `effect_named("nome", f)`, `profile_effects`, `take_effect_totals` e a linha `efeitos mais caros`
+  no registro de travamentos.
+
 - `TabView::tab_visible(|chave| bool)`: a aba em que a closure (reativa) devolve `false` sai da
   faixa, do Ctrl+Tab, das setas e da largura das abas iguais, e o painel continua montado, só
   oculto. Se a escolhida some, a escolha passa para a vizinha; com `.on_reorder`, os índices
@@ -97,6 +104,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Mudado
 
+- O `TerminalPanes` divide um painel sem recriar os terminais, e o menu de contexto das abas só é
+  criado ao abrir pela primeira vez: antes disso os itens não existem na árvore, e um `.shortcut()`
+  neles não vale. A grade não remonta mais o foco de quem já o tinha (snapshots `m23_grade_3x3_*`).
+- Menos trabalho por quadro: os despertares se juntam em um quadro por janela, o `Inbox` só acorda a
+  interface quando a fila passa de vazia para com bytes, as abas escondidas são lidas a cada 100 ms e
+  os animadores parados informam quanto falta (`Widget::ticking_in`).
+
 - `TitleBar::subtitle` vazio some e não deixa espaço, como o `Collapsed` do WinUI: uma closure
   pode mostrar o subtítulo só quando faz sentido.
 - O `TestApp` passa o título do `Form` à janela a cada quadro, como o runner: um título que muda
@@ -105,6 +119,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   cortar os itens de baixo.
 
 ### Corrigido
+
+- `dialogs::save_file()` com filtro põe a primeira extensão do primeiro filtro num nome sem extensão:
+  o portal do Linux e o zenity gravavam o nome como foi digitado, e o arquivo sumia do filtro ao abrir.
+- O `.ppk` Ed25519 com um zero à esquerda na semente (uma chave em cada 512) não abria.
 
 - A lentidão com muitas abas e janelas: o `Tree::deadline` pergunta primeiro se o animador está
   andando, e só depois se ele aparece, como o `advance` já fazia. Antes, cada volta do loop subia

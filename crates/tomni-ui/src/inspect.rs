@@ -479,7 +479,7 @@ impl Ui {
                 .flat_map(|a| a.shortcuts())
                 .map(|shortcut| shortcut.to_string())
                 .collect(),
-            context_flyout: tree.context_flyout(id).is_some(),
+            context_flyout: tree.has_context_flyout(id),
             items: None,
             items_total: None,
             filter: None,

@@ -841,17 +841,35 @@ impl fmt::Debug for MenuFlyout {
 
 /// Menu de contexto guardado no [`Common`] até a montagem (`.context_flyout()`).
 ///
-/// Dividido entre as cópias do `Common`: só a primeira montagem leva o menu.
+/// Dividido entre as cópias do `Common`: só a primeira montagem leva o menu. O das abas do
+/// `TabView` (`.tab_context_flyout()`) é feito só quando abre pela primeira vez: com muitas
+/// abas, montar todos os menus junto das abas pesava (cada um tem vários itens).
 #[derive(Clone)]
-pub struct ContextFlyout(Rc<RefCell<Option<Box<dyn Widget>>>>);
+pub struct ContextFlyout(Rc<RefCell<Option<ContextMenu>>>);
+
+/// O menu que a árvore monta: pronto, ou feito na primeira abertura.
+pub(crate) enum ContextMenu {
+    /// Montado junto com o dono.
+    Ready(Box<dyn Widget>),
+    /// Feito e montado quando abrir pela primeira vez.
+    Later(Box<dyn FnOnce() -> Box<dyn Widget>>),
+}
 
 impl ContextFlyout {
     pub(crate) fn new(menu: MenuFlyout) -> Self {
-        Self(Rc::new(RefCell::new(Some(Box::new(menu)))))
+        Self(Rc::new(RefCell::new(Some(ContextMenu::Ready(Box::new(
+            menu,
+        ))))))
+    }
+
+    /// Menu feito por `make` só quando abrir pela primeira vez.
+    pub(crate) fn later(make: impl FnOnce() -> MenuFlyout + 'static) -> Self {
+        let make = Box::new(move || Box::new(make()) as Box<dyn Widget>);
+        Self(Rc::new(RefCell::new(Some(ContextMenu::Later(make)))))
     }
 
     /// Tira o menu, para a árvore montar.
-    pub(crate) fn take(&self) -> Option<Box<dyn Widget>> {
+    pub(crate) fn take(&self) -> Option<ContextMenu> {
         self.0.borrow_mut().take()
     }
 }

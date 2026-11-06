@@ -469,11 +469,11 @@ fn act(ui: &mut Ui, action: Action, notes: &mut Vec<String>) -> Result<(), Strin
             let tree = ui.tree();
             let mut owner = Some(n);
             while let Some(o) = owner
-                && tree.context_flyout(o).is_none()
+                && !tree.has_context_flyout(o)
             {
                 owner = tree.parent(o);
             }
-            let Some(menu) = owner.and_then(|o| tree.context_flyout(o)) else {
+            let Some(owner) = owner else {
                 return Err(format!(
                     "{id} não tem menu de contexto (`.context_flyout`), nem um contêiner em volta"
                 ));
@@ -486,7 +486,10 @@ fn act(ui: &mut Ui, action: Action, notes: &mut Vec<String>) -> Result<(), Strin
             ui.frame();
             ui.secondary_up(point);
             ui.frame();
-            if ui.tree().shown(menu) {
+            // O menu das abas do `TabView` só existe depois de abrir.
+            if let Some(menu) = ui.tree().context_flyout(owner)
+                && ui.tree().shown(menu)
+            {
                 notes.push(format!("menu {} aberto", ui.tree().name(menu)));
             }
         }
