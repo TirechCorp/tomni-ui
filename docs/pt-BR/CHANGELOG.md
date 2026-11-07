@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- `tomni_ui_win32::disk_health()`: o registro de saúde de cada NVMe e as estatísticas do ATA de
+  cada SATA (páginas 1, 3 e 7), pelo `IOCTL_STORAGE_QUERY_PROPERTY`, com o barramento, o modelo e
+  o setor lógico; `access_denied` quando o sistema recusa. Ainda não conferido num Windows de
+  verdade.
+- `tomni_ui_macos::nvme_health()` e `is_virtual_machine()`: o registro de saúde de cada NVMe pelo
+  plug-in `NVMeSMARTLib` do IOKit, sem root, com o nome BSD e o modelo.
 - `Reuse::new(chave, || view)`: dentro de um `Show` ou `For` que remonta, a parte com a chave de uma
   que saiu na mesma troca volta inteira (widgets, estado, foco, signals), sem criar a view de novo.
 - `TerminalPanes::on_close_pane(|painel| ...)` deixa o app decidir o "fechar o painel" de um painel

@@ -14,7 +14,8 @@
 //! app no registro (`RegCreateKeyExW`, `RegSetValueExW`). Os sensores de temperatura leem o
 //! `IOCTL_STORAGE_QUERY_PROPERTY` dos discos, o contador das zonas térmicas no PDH, o WMI do
 //! LibreHardwareMonitor (com o COM e os `VARIANT`) e o nome do processador no registro
-//! (`RegGetValueW`). A pesquisa não achou crate com API segura para nenhuma
+//! (`RegGetValueW`). A saúde dos discos (`disk_health`) lê, pelo mesmo IOCTL, o registro de
+//! saúde do NVMe e as estatísticas do ATA (`StorageDeviceProtocolSpecificProperty`). A pesquisa não achou crate com API segura para nenhuma
 //! delas, e o usuário aprovou o `unsafe` contido aqui em 19/10.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
@@ -34,6 +35,7 @@ mod network;
 mod pipe;
 mod process;
 mod sensors;
+mod smart;
 mod toast;
 mod window;
 
@@ -50,6 +52,7 @@ pub use process::{
     ProcessEntry, ProcessUsage, process_path, process_table, process_usage, process_user,
 };
 pub use sensors::{Fan, Sensors, Temperature, cpu_name, sensors};
+pub use smart::{DiskBus, DiskHealth, disk_health};
 pub use toast::Toasts;
 pub use window::{CopyDataWindow, window_exists};
 

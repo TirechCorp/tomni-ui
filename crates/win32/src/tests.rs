@@ -206,3 +206,17 @@ fn os_discos_fisicos_tem_contadores_que_so_sobem() {
         "{depois:?}"
     );
 }
+
+#[test]
+fn a_saude_dos_discos_tem_registros_do_tamanho_certo() {
+    for disco in crate::disk_health() {
+        assert!(disco.index < 32, "{disco:?}");
+        if let Some(registro) = &disco.nvme_smart_log {
+            assert_eq!(registro.len(), 512);
+        }
+        for pagina in &disco.ata_device_statistics {
+            assert_eq!(pagina.len(), 512);
+        }
+        assert!(disco.logical_sector_size >= 512, "{disco:?}");
+    }
+}

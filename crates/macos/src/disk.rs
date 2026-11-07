@@ -9,17 +9,17 @@ use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 
 /// Um objeto do IOKit (`io_object_t`, `io_iterator_t`, `io_registry_entry_t`).
-type Objeto = libc::mach_port_t;
+pub(crate) type Objeto = libc::mach_port_t;
 
 #[link(name = "IOKit", kind = "framework")]
 unsafe extern "C" {
-    fn IOServiceMatching(name: *const c_char) -> CFMutableDictionaryRef;
-    fn IOServiceGetMatchingServices(
+    pub(crate) fn IOServiceMatching(name: *const c_char) -> CFMutableDictionaryRef;
+    pub(crate) fn IOServiceGetMatchingServices(
         main_port: libc::mach_port_t,
         matching: CFMutableDictionaryRef,
         existing: *mut Objeto,
     ) -> libc::kern_return_t;
-    fn IOIteratorNext(iterator: Objeto) -> Objeto;
+    pub(crate) fn IOIteratorNext(iterator: Objeto) -> Objeto;
     fn IOObjectRelease(object: Objeto) -> libc::kern_return_t;
     fn IOObjectConformsTo(object: Objeto, class_name: *const c_char) -> libc::boolean_t;
     fn IORegistryEntryGetParentEntry(
@@ -152,7 +152,7 @@ fn pai(objeto: Objeto) -> Option<Objeto> {
 }
 
 /// As propriedades de `objeto`, num dicionário novo.
-fn propriedades(objeto: Objeto) -> Option<CFDictionary> {
+pub(crate) fn propriedades(objeto: Objeto) -> Option<CFDictionary> {
     let mut dicionario: CFMutableDictionaryRef = std::ptr::null_mut();
     // SAFETY: `objeto` é válido e `dicionario` é local; o alocador padrão é uma constante.
     let erro = unsafe {
@@ -167,7 +167,7 @@ fn propriedades(objeto: Objeto) -> Option<CFDictionary> {
 }
 
 /// O valor de `chave` num dicionário.
-fn valor(dicionario: &CFDictionary, chave: &'static str) -> Option<CFType> {
+pub(crate) fn valor(dicionario: &CFDictionary, chave: &'static str) -> Option<CFType> {
     let chave = CFString::from_static_string(chave);
     let item = dicionario.find(chave.as_CFTypeRef())?;
     // SAFETY: o valor é um objeto do Core Foundation que o dicionário guarda; a regra de pegar
@@ -176,7 +176,7 @@ fn valor(dicionario: &CFDictionary, chave: &'static str) -> Option<CFType> {
 }
 
 /// Um objeto do IOKit que se solta ao sair.
-struct Liberar(Objeto);
+pub(crate) struct Liberar(pub(crate) Objeto);
 
 impl Drop for Liberar {
     fn drop(&mut self) {

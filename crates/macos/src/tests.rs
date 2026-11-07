@@ -8,8 +8,8 @@ use crate::network::{cabecalhos, interface};
 use crate::process::converter;
 use crate::{
     CpuTimes, ProcessState, all_pids, child_pids, cpu_brand, cpu_times, disk_counters,
-    memory_status, network_interfaces, process_info, process_path, process_usage, temperatures,
-    user_name,
+    is_virtual_machine, memory_status, network_interfaces, nvme_health, process_info, process_path,
+    process_usage, temperatures, user_name,
 };
 
 #[test]
@@ -242,4 +242,22 @@ fn as_temperaturas_do_apple_silicon_e_o_nome_do_processador() {
         }
     }
     eprintln!("{nome}: {sensores:#?}");
+}
+
+#[test]
+fn os_discos_nvme_tem_nome_bsd_e_registro_de_512_bytes() {
+    let discos = nvme_health().unwrap();
+    let contadores = disk_counters().unwrap();
+    for disco in &discos {
+        assert!(disco.name.starts_with("disk"), "{disco:?}");
+        // O mesmo nome da aba Disco, para a linha da saúde casar com a dos contadores.
+        assert!(contadores.iter().any(|c| c.name == disco.name), "{disco:?}");
+        if let Some(registro) = &disco.smart_log {
+            assert_eq!(registro.len(), 512);
+        }
+    }
+    // Um Mac com Apple Silicon de verdade tem o disco interno, com SMART e lido sem root.
+    if cfg!(target_arch = "aarch64") && !is_virtual_machine() {
+        assert!(discos.iter().any(|d| d.smart_log.is_some()), "{discos:?}");
+    }
 }

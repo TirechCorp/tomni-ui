@@ -217,7 +217,7 @@ fn modelo(disco: HANDLE) -> Option<String> {
 }
 
 /// Os bytes de um buffer de `u64`.
-fn em_bytes(dados: &[u64]) -> &[u8] {
+pub(crate) fn em_bytes(dados: &[u64]) -> &[u8] {
     // SAFETY: um `u64` é feito de 8 bytes sem preenchimento; o slice de bytes cobre a mesma
     // memória, com o mesmo tempo de vida.
     unsafe { std::slice::from_raw_parts(dados.as_ptr().cast::<u8>(), size_of_val(dados)) }
@@ -225,7 +225,11 @@ fn em_bytes(dados: &[u64]) -> &[u8] {
 
 /// A resposta de um `IOCTL_STORAGE_QUERY_PROPERTY` padrão, num buffer de `u64` (para o
 /// alinhamento) de até `bytes`.
-fn propriedade(disco: HANDLE, id: STORAGE_PROPERTY_ID, bytes: usize) -> Option<Vec<u64>> {
+pub(crate) fn propriedade(
+    disco: HANDLE,
+    id: STORAGE_PROPERTY_ID,
+    bytes: usize,
+) -> Option<Vec<u64>> {
     let pedido = STORAGE_PROPERTY_QUERY {
         PropertyId: id,
         QueryType: PropertyStandardQuery,

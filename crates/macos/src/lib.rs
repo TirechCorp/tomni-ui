@@ -18,6 +18,11 @@
 //! As temperaturas (`temperatures`) vêm dos serviços HID de temperatura do Apple Silicon, pelo
 //! `IOHIDEventSystemClient` do IOKit (exportado, mas fora dos cabeçalhos, e por isso declarado
 //! aqui), sem root; o nome do processador, do `machdep.cpu.brand_string`.
+//! A saúde dos discos NVMe (`nvme_health`) vem do plug-in `NVMeSMARTLib` do IOKit
+//! (`IOCreatePlugInInterfaceForService`, o `QueryInterface` e o `SMARTReadData` das tabelas de
+//! funções do COM do Core Foundation, `IODestroyPlugInInterface`, com os UUIDs pelo
+//! `CFUUIDGetConstantUUIDWithBytes` e o nome do disco pelo `IORegistryEntrySearchCFProperty`), sem
+//! root; a máquina virtual, do `kern.hv_vmm_present`.
 //!
 //! Cada bloco `unsafe` tem um `// SAFETY:` que diz por que a chamada é válida, tem uma única
 //! operação insegura, e nenhuma função pública do crate é `unsafe`.
@@ -32,6 +37,7 @@ mod memory;
 mod network;
 mod notification;
 mod process;
+mod smart;
 mod temperature;
 
 #[cfg(test)]
@@ -46,4 +52,5 @@ pub use process::{
     DiskUsage, ProcessInfo, ProcessState, ProcessUsage, all_pids, child_pids, process_info,
     process_path, process_usage, user_name,
 };
+pub use smart::{NvmeHealth, is_virtual_machine, nvme_health};
 pub use temperature::{Temperature, cpu_brand, temperatures};

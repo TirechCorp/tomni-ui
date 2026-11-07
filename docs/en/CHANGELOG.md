@@ -7,6 +7,12 @@ follow [SemVer](https://semver.org/). In the 0.x series, a minor version may bre
 
 ### Added
 
+- `tomni_ui_win32::disk_health()`: each NVMe disk's health log and each SATA disk's ATA device
+  statistics (pages 1, 3 and 7), through `IOCTL_STORAGE_QUERY_PROPERTY`, with the bus, the model and
+  the logical sector size; `access_denied` when the system refuses. Not yet checked on a real
+  Windows machine.
+- `tomni_ui_macos::nvme_health()` and `is_virtual_machine()`: each NVMe disk's health log through
+  the IOKit `NVMeSMARTLib` plug-in, without root, with the BSD name and the model.
 - `Reuse::new(key, || view)`: inside a `Show` or `For` that remounts, the part whose key matches one
   that left in the same swap comes back whole (widgets, state, focus, signals), without creating the
   view again.
